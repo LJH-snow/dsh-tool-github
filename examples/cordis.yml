@@ -1,0 +1,10 @@
+# dsh-tool-github 组合示例
+# 用法：在 dsh 的组合配置中引入本插件（示例片段，按你的部署组合调整）
+- name: 'dsh-tool-github'
+  config:
+    # GitHub Personal Access Token（可选；github_search_code / github_create_pr_draft 需要）
+    token: 'ghp_xxx'
+    # GitHub API base URL（可选，GitHub Enterprise 自托管时使用）
+    # baseUrl: 'https://github.example.com/api/v3'
+    # 请求超时（毫秒，可选，默认 15000）
+    # timeoutMs: 15000
