@@ -69,6 +69,11 @@ Full example: [examples/cordis.yml](examples/cordis.yml).
 | `github_list_workflow_runs` | List Actions runs (workflow, branch, status) | no* |
 | `github_create_branch` | Create a branch from a ref | yes |
 | `github_write_file` | Create/update a file (creates a commit) | yes |
+| `github_get_readme` | Read the repository README (markdown) | no |
+| `github_list_tags` | List version tags | no |
+| `github_star_repo` | Star a repository | yes |
+| `github_unstar_repo` | Remove a star | yes |
+| `github_create_release` | Create a release for a tag | yes |
 | `github_create_pr_draft` | Create a draft PR (head/base/title/body) | yes |
 
 ### Behavior contract (per the official execute contract)

@@ -368,3 +368,59 @@ describe('GithubClient stage 9', () => {
     }
   })
 })
+
+describe('GithubClient stage 10', () => {
+  it('getReadme fetches and decodes base64 content, 404 → found:false', async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse(200, {
+      content: Buffer.from('# Hello').toString('base64'), encoding: 'base64', size: 7, html_url: 'https://x',
+    }))
+    const client = new GithubClient({ fetchImpl })
+    const readme = await client.getReadme('a', 'b')
+    expect(readme).toEqual({ found: true, content: '# Hello', size: 7, url: 'https://x' })
+
+    const client404 = new GithubClient({ fetchImpl: vi.fn(async () => jsonResponse(404, {})) })
+    expect(await client404.getReadme('a', 'b')).toEqual({ found: false })
+  })
+
+  it('listTags maps tags with short SHA', async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse(200, [
+      { name: 'v1.0.0', commit: { sha: 'abcdef123456' } },
+    ]))
+    const client = new GithubClient({ fetchImpl })
+    const tags = await client.listTags('a', 'b', { perPage: 5 })
+    expect(tags).toEqual([{ name: 'v1.0.0', commitSha: 'abcdef1' }])
+  })
+
+  it('starRepo PUTs and unstarRepo DELETEs', async () => {
+    const starFetch = vi.fn(async () => new Response(null, { status: 204 }))
+    const starClient = new GithubClient({ token: 'ghp_test', fetchImpl: starFetch })
+    expect(await starClient.starRepo('a', 'b')).toEqual({ ok: true })
+    expect(starFetch.mock.calls[0][1]).toMatchObject({ method: 'PUT' })
+    expect(starFetch.mock.calls[0][0]).toContain('/user/starred/a/b')
+
+    const unstarFetch = vi.fn(async () => new Response(null, { status: 204 }))
+    const unstarClient = new GithubClient({ token: 'ghp_test', fetchImpl: unstarFetch })
+    expect(await unstarClient.unstarRepo('a', 'b')).toEqual({ ok: true })
+    expect(unstarFetch.mock.calls[0][1]).toMatchObject({ method: 'DELETE' })
+  })
+
+  it('starRepo maps 404 to a business failure', async () => {
+    const client = new GithubClient({ token: 'ghp_test', fetchImpl: vi.fn(async () => jsonResponse(404, {})) })
+    const result = await client.starRepo('nope', 'missing')
+    expect(result.ok).toBe(false)
+  })
+
+  it('createRelease POSTs release fields and maps 422', async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse(201, { id: 5, html_url: 'https://github.com/a/b/releases/v1' }))
+    const client = new GithubClient({ token: 'ghp_test', fetchImpl })
+    const result = await client.createRelease('a', 'b', { tagName: 'v1.0.0', name: 'Release One', body: 'notes' })
+    const [, init] = fetchImpl.mock.calls[0] as [string, RequestInit]
+    expect(init.method).toBe('POST')
+    expect(JSON.parse(String(init.body))).toMatchObject({ tag_name: 'v1.0.0', name: 'Release One', body: 'notes', draft: false, prerelease: false })
+    expect(result).toEqual({ ok: true, id: 5, url: 'https://github.com/a/b/releases/v1' })
+
+    const client422 = new GithubClient({ token: 'ghp_test', fetchImpl: vi.fn(async () => jsonResponse(422, {})) })
+    const failed = await client422.createRelease('a', 'b', { tagName: 'v1' })
+    expect(failed.ok).toBe(false)
+  })
+})

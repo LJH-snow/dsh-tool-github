@@ -20,8 +20,10 @@ describe('tool definitions', () => {
       'github_create_branch',
       'github_create_issue',
       'github_create_pr_draft',
+      'github_create_release',
       'github_get_file',
       'github_get_issue',
+      'github_get_readme',
       'github_get_repo',
       'github_get_user',
       'github_list_branches',
@@ -31,10 +33,13 @@ describe('tool definitions', () => {
       'github_list_pr_comments',
       'github_list_prs',
       'github_list_releases',
+      'github_list_tags',
       'github_list_workflow_runs',
       'github_merge_pr',
       'github_search_code',
       'github_search_repos',
+      'github_star_repo',
+      'github_unstar_repo',
       'github_update_issue',
       'github_write_file',
     ])
@@ -129,15 +134,17 @@ describe('tool presentation (pure render intents)', () => {
 })
 
 describe('extended tools (stage 5)', () => {
-  it('registers all twenty-one tools', () => {
+  it('registers all twenty-six tools', () => {
     const names = Object.keys(Object.fromEntries(createTools(new GithubClient()).map(t => [t.name, t]))).sort()
     expect(names).toEqual([
       'github_comment_issue',
       'github_create_branch',
       'github_create_issue',
       'github_create_pr_draft',
+      'github_create_release',
       'github_get_file',
       'github_get_issue',
+      'github_get_readme',
       'github_get_repo',
       'github_get_user',
       'github_list_branches',
@@ -147,10 +154,13 @@ describe('extended tools (stage 5)', () => {
       'github_list_pr_comments',
       'github_list_prs',
       'github_list_releases',
+      'github_list_tags',
       'github_list_workflow_runs',
       'github_merge_pr',
       'github_search_code',
       'github_search_repos',
+      'github_star_repo',
+      'github_unstar_repo',
       'github_update_issue',
       'github_write_file',
     ])
@@ -300,5 +310,51 @@ describe('stage 9 tools', () => {
     expect(defs['github_list_workflow_runs'].presentCall({ owner: 'a', repo: 'b' })).toMatchObject({ kind: 'search' })
     expect(defs['github_create_branch'].presentCall({ owner: 'a', repo: 'b', branch: 'feat/x' })).toMatchObject({ kind: 'edit' })
     expect(defs['github_write_file'].presentCall({ owner: 'a', repo: 'b', path: 'x.md', content: '', message: '' })).toMatchObject({ kind: 'edit' })
+  })
+})
+
+describe('stage 10 tools', () => {
+  it('write tools require a token', async () => {
+    const defs = Object.fromEntries(createTools(new GithubClient({ fetchImpl: vi.fn() })).map(t => [t.name, t]))
+    for (const name of ['github_star_repo', 'github_unstar_repo', 'github_create_release']) {
+      const args = name === 'github_create_release'
+        ? { owner: 'a', repo: 'b', tagName: 'v1' }
+        : { owner: 'a', repo: 'b' }
+      const result = await defs[name].execute(args, exec())
+      expect(result.ok).toBe(false)
+      expect(result.reason).toContain('token')
+    }
+  })
+
+  it('read-only stage 10 tools work without a token', async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse(200, []))
+    const client = new GithubClient({ fetchImpl })
+    const defs = Object.fromEntries(createTools(client).map(t => [t.name, t]))
+    const tags = await defs['github_list_tags'].execute({ owner: 'a', repo: 'b' }, exec())
+    expect(tags).toEqual({ items: [] })
+  })
+
+  it('github_get_readme returns found:false on 404', async () => {
+    const client = new GithubClient({ fetchImpl: vi.fn(async () => jsonResponse(404, {})) })
+    const tool = createTools(client).find(t => t.name === 'github_get_readme')!
+    const result = await tool.execute({ owner: 'a', repo: 'b' }, exec())
+    expect(result).toEqual({ found: false })
+  })
+
+  it('github_create_release passes through with a token', async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse(201, { id: 1, html_url: 'https://x' }))
+    const client = new GithubClient({ token: 'ghp_test', fetchImpl })
+    const tool = createTools(client).find(t => t.name === 'github_create_release')!
+    const result = await tool.execute({ owner: 'a', repo: 'b', tagName: 'v1.0.0' }, exec())
+    expect(result).toEqual({ ok: true, id: 1, url: 'https://x' })
+  })
+
+  it('presentCall for stage 10 tools', () => {
+    const defs = Object.fromEntries(createTools(new GithubClient()).map(t => [t.name, t])) as any
+    expect(defs['github_get_readme'].presentCall({ owner: 'a', repo: 'b' })).toMatchObject({ kind: 'read' })
+    expect(defs['github_list_tags'].presentCall({ owner: 'a', repo: 'b' })).toMatchObject({ kind: 'search' })
+    expect(defs['github_star_repo'].presentCall({ owner: 'a', repo: 'b' })).toMatchObject({ kind: 'edit' })
+    expect(defs['github_unstar_repo'].presentCall({ owner: 'a', repo: 'b' })).toMatchObject({ kind: 'edit' })
+    expect(defs['github_create_release'].presentCall({ owner: 'a', repo: 'b', tagName: 'v1' })).toMatchObject({ kind: 'edit' })
   })
 })

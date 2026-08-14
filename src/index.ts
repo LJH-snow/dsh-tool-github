@@ -1103,6 +1103,212 @@ export function createTools(client: GithubClient) {
     }),
 
     defineTool({
+      name: 'github_get_readme',
+      description: 'Read the README of a GitHub repository as markdown text.',
+      parameters: {
+        owner: { type: 'string', required: true, description: 'Repository owner' },
+        repo: { type: 'string', required: true, description: 'Repository name' },
+        ref: { type: 'string', description: 'Branch or ref (defaults to the default branch)' },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            found: { type: 'boolean', description: 'Whether a README exists' },
+            content: { type: 'string', description: 'README markdown text' },
+            size: { type: 'integer', description: 'README size in bytes' },
+            url: { type: 'string', description: 'README URL' },
+          },
+        },
+        render: (_args, value) => {
+          if (!value.found) return [{ type: 'text', text: 'No README found.' }]
+          const content = value.content ?? ''
+          const preview = content.length > 4000 ? `${content.slice(0, 4000)}\n... [truncated, ${content.length} chars total]` : content
+          return [{ type: 'text', text: preview }]
+        },
+      },
+      presentCall(args): ToolCallView {
+        return { card: 'generic', title: `README: ${args.owner}/${args.repo}`, kind: 'read' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { found?: boolean; size?: number }
+        if (!v.found) return { card: 'generic', title: 'No README' }
+        return { card: 'generic', title: `README (${v.size} bytes)` }
+      },
+      async execute(args, exec) {
+        const readme = await client.getReadme(args.owner, args.repo, { ref: args.ref, signal: exec.signal })
+        return readme
+      },
+    }),
+
+    defineTool({
+      name: 'github_list_tags',
+      description: 'List version tags of a GitHub repository with their latest commit SHAs.',
+      parameters: {
+        owner: { type: 'string', required: true, description: 'Repository owner' },
+        repo: { type: 'string', required: true, description: 'Repository name' },
+        limit: { type: 'integer', description: 'Maximum results, 1-50 (default 20)' },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            items: {
+              type: 'array',
+              items: {
+                type: 'object',
+                additionalProperties: false,
+                properties: {
+                  name: { type: 'string', description: 'Tag name' },
+                  commitSha: { type: 'string', description: 'Commit short SHA' },
+                },
+              },
+            },
+          },
+        },
+        render: (_args, value) => {
+          const items = value.items ?? []
+          if (items.length === 0) return [{ type: 'text', text: 'No tags found.' }]
+          return [{ type: 'text', text: items.map(i => `${i.name} (${i.commitSha})`).join('\n') }]
+        },
+      },
+      presentCall(args): ToolCallView {
+        return { card: 'generic', title: `Tags: ${args.owner}/${args.repo}`, kind: 'search' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { items?: Array<{ name: string }> }
+        const items = v.items ?? []
+        if (items.length === 0) return { card: 'generic', title: 'No tags' }
+        return { card: 'generic', title: `${items.length} tag(s)`, content: [{ type: 'text', text: items.map(i => i.name).join('\n') }] }
+      },
+      async execute(args, exec) {
+        const limit = args.limit === undefined ? 20 : Math.max(1, Math.min(args.limit, 50))
+        const items = await client.listTags(args.owner, args.repo, { perPage: limit, signal: exec.signal })
+        return { items }
+      },
+    }),
+
+    defineTool({
+      name: 'github_star_repo',
+      description: 'Star a GitHub repository for the authenticated user. WRITE operation: requires a token.',
+      parameters: {
+        owner: { type: 'string', required: true, description: 'Repository owner' },
+        repo: { type: 'string', required: true, description: 'Repository name' },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            ok: { type: 'boolean', description: 'Whether the repository was starred' },
+            reason: { type: 'string', description: 'Explanation when not starred' },
+          },
+        },
+        render: (args, value) => {
+          if (value.ok) return [{ type: 'text', text: `Starred ${args.owner}/${args.repo}` }]
+          return [{ type: 'text', text: `Could not star: ${value.reason}` }]
+        },
+      },
+      presentCall(args): ToolCallView {
+        return { card: 'generic', title: `Star ${args.owner}/${args.repo}`, kind: 'edit' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { ok?: boolean; reason?: string }
+        if (v.ok) return { card: 'generic', title: 'Starred' }
+        return { card: 'generic', title: 'Star failed', content: [{ type: 'text', text: v.reason ?? 'Unknown' }] }
+      },
+      async execute(args, exec) {
+        if (!client.hasToken()) {
+          return { ok: false, reason: 'Starring requires a GitHub token. Configure the plugin with a token.' }
+        }
+        return client.starRepo(args.owner, args.repo, exec.signal)
+      },
+    }),
+
+    defineTool({
+      name: 'github_unstar_repo',
+      description: 'Remove a star from a GitHub repository for the authenticated user. WRITE operation: requires a token.',
+      parameters: {
+        owner: { type: 'string', required: true, description: 'Repository owner' },
+        repo: { type: 'string', required: true, description: 'Repository name' },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            ok: { type: 'boolean', description: 'Whether the star was removed' },
+            reason: { type: 'string', description: 'Explanation when not removed' },
+          },
+        },
+        render: (args, value) => {
+          if (value.ok) return [{ type: 'text', text: `Unstarred ${args.owner}/${args.repo}` }]
+          return [{ type: 'text', text: `Could not unstar: ${value.reason}` }]
+        },
+      },
+      presentCall(args): ToolCallView {
+        return { card: 'generic', title: `Unstar ${args.owner}/${args.repo}`, kind: 'edit' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { ok?: boolean; reason?: string }
+        if (v.ok) return { card: 'generic', title: 'Unstarred' }
+        return { card: 'generic', title: 'Unstar failed', content: [{ type: 'text', text: v.reason ?? 'Unknown' }] }
+      },
+      async execute(args, exec) {
+        if (!client.hasToken()) {
+          return { ok: false, reason: 'Unstarring requires a GitHub token. Configure the plugin with a token.' }
+        }
+        return client.unstarRepo(args.owner, args.repo, exec.signal)
+      },
+    }),
+
+    defineTool({
+      name: 'github_create_release',
+      description: 'Create a GitHub Release for an existing tag. WRITE operation: requires a token and creates a public release.',
+      parameters: {
+        owner: { type: 'string', required: true, description: 'Repository owner' },
+        repo: { type: 'string', required: true, description: 'Repository name' },
+        tagName: { type: 'string', required: true, description: 'Existing tag name, e.g. v1.0.0' },
+        name: { type: 'string', description: 'Release title (defaults to the tag name)' },
+        body: { type: 'string', description: 'Release notes (Markdown)' },
+        draft: { type: 'boolean', description: 'Create as a draft (default false)' },
+        prerelease: { type: 'boolean', description: 'Mark as prerelease (default false)' },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            ok: { type: 'boolean', description: 'Whether the release was created' },
+            id: { type: 'integer', description: 'Release id' },
+            url: { type: 'string', description: 'Release URL' },
+            reason: { type: 'string', description: 'Explanation when not created' },
+          },
+        },
+        render: (_args, value) => {
+          if (value.ok) return [{ type: 'text', text: `Created release: ${value.url}` }]
+          return [{ type: 'text', text: `Could not create release: ${value.reason}` }]
+        },
+      },
+      presentCall(args): ToolCallView {
+        return { card: 'generic', title: `Release ${args.tagName}`, kind: 'edit' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { ok?: boolean; url?: string; reason?: string }
+        if (v.ok) return { card: 'generic', title: 'Release created', content: [{ type: 'text', text: v.url ?? '' }] }
+        return { card: 'generic', title: 'Create release failed', content: [{ type: 'text', text: v.reason ?? 'Unknown' }] }
+      },
+      async execute(args, exec) {
+        if (!client.hasToken()) {
+          return { ok: false, reason: 'Creating a release requires a GitHub token. Configure the plugin with a token.' }
+        }
+        return client.createRelease(args.owner, args.repo, { tagName: args.tagName, name: args.name, body: args.body, draft: args.draft, prerelease: args.prerelease }, exec.signal)
+      },
+    }),
+
+    defineTool({
       name: 'github_create_pr_draft',
       description: 'Create a draft pull request on GitHub. Returns the PR number and URL when created.',
       parameters: {

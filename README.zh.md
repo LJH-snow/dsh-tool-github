@@ -71,6 +71,11 @@ npm install /path/to/dsh-tool-github
 | `github_list_workflow_runs` | 查看 Actions 运行（workflow、分支、状态） | 否* |
 | `github_create_branch` | 创建分支（从指定 ref） | 是 |
 | `github_write_file` | 创建/更新文件（自动提交） | 是 |
+| `github_get_readme` | 读取仓库 README（markdown） | 否 |
+| `github_list_tags` | 列出版本标签 | 否 |
+| `github_star_repo` | star 仓库 | 是 |
+| `github_unstar_repo` | 取消 star | 是 |
+| `github_create_release` | 为 tag 创建 Release | 是 |
 | `github_create_pr_draft` | 创建 draft PR（head/base/title/body） | 是 |
 
 ### 行为约定（遵循官方 execute 契约）

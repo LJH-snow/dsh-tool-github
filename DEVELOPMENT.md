@@ -189,6 +189,24 @@ v0.5 方向：补齐「查人、查 CI、建分支、改文件」——写文件
 
 - 验收：typecheck ✅；61/61 单测（含无 token、422/409/404 错误路径、ref 编码）；README 工具表同步；本文档日志更新。
 
+### 阶段 10：README / 标签 / star / Release（2026-08-14 新增）
+
+v0.6 方向：补齐「看 README、看版本标签、star/unstar、发 Release」——让 Agent 既能了解项目全貌，也能参与社区互动与发布。
+
+| 工具 | 功能 | 需 token | 状态 |
+|---|---|---|---|
+| `github_get_readme` | 读取仓库 README（markdown 文本） | 否 | ✅ 已实现 |
+| `github_list_tags` | 列出仓库版本标签 | 否 | ✅ 已实现 |
+| `github_star_repo` | star 一个仓库（写） | 是 | ✅ 已实现 |
+| `github_unstar_repo` | 取消 star（写） | 是 | ✅ 已实现 |
+| `github_create_release` | 创建 Release（写，需 tag） | 是 | ✅ 已实现 |
+
+安全设计：
+- star/unstar/create_release 为写操作：需 token，无 token → 业务失败值；404/422 → 业务失败值。
+- `github_create_release` 描述标注副作用（创建公开 release）。
+
+- 验收：typecheck ✅；71/71 单测（含无 token、204 处理、404/422 错误路径）；README 工具表同步；本文档日志更新。
+
 ## 5. 开发日志（每次推进后追加，带时间戳）
 
 ### 2026-08-14（阶段 5：高频工具扩展完成）
@@ -235,6 +253,20 @@ v0.5 方向：补齐「查人、查 CI、建分支、改文件」——写文件
 - 测试：client +6（user 映射/CI 过滤/建分支两段流程/422/写文件 base64+commit/422+409），tools +5（无 token×2、只读成功、404、写文件透传、presentCall×4）；共 61/61 通过。
 - 踩坑：git ref 端点的 ref 参数不能整体 encodeURIComponent（会把 `/` 变 `%2F`），需按 `/` 分段编码。
 - 验证：typecheck ✅、vitest 61/61 ✅、build ✅；README 中英文同步（21 工具 + workflow 私有仓库需 token 注记）。
+### 2026-08-14（阶段 10：README/标签/star/Release 完成，共 26 个工具）
+- 新增 5 个工具：
+  - `github_get_readme`（只读）：README markdown（base64 解码、ref 支持、404 → `{found:false}`、渲染截断 4000 字符）。
+  - `github_list_tags`（只读）：版本标签 + short SHA，上限 50。
+  - `github_star_repo`/`github_unstar_repo`（写）：PUT/DELETE /user/starred/{owner}/{repo}；404 → 业务失败值。
+  - `github_create_release`（写）：POST releases（tag/name/body/draft/prerelease）；422 → 业务失败值；描述标注副作用。
+- 修复客户端 bug：`request` 对 204 No Content 响应不再 `res.json()`（star/unstar 返回 204），直接返回 undefined。
+- 测试：client +5（readme 解码+404、tags、star PUT/unstar DELETE、star 404、release POST+422），tools +5（无 token×3、只读成功、readme 404、release 透传、presentCall×5）；共 71/71 通过。
+- 验证：typecheck ✅、vitest 71/71 ✅、build ✅；README 中英文同步（26 工具）。
+- 阶段 10 达成 26 工具目标，下一目标：第二个插件。
+### 2026-08-14（阶段 10：启动）
+- 规划五个工具：README 读取（只读）、标签列表（只读）、star/unstar（写）、创建 Release（写）。
+- 目标：26 个工具后转向第二个插件开发。
+
 ### 2026-08-14（阶段 9：启动）
 - 项目获 2 颗 star，继续完善。
 - 规划四个工具：用户信息（只读）、CI 状态（只读）、创建分支（写）、写文件（写）。

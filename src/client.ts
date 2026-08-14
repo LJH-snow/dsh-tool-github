@@ -155,6 +155,30 @@ export interface FileWriteResult {
   reason?: string
 }
 
+export interface ReadmeInfo {
+  found: boolean
+  content?: string
+  size?: number
+  url?: string
+}
+
+export interface TagItem {
+  name: string
+  commitSha: string
+}
+
+export interface StarResult {
+  ok: boolean
+  reason?: string
+}
+
+export interface ReleaseCreateResult {
+  ok: boolean
+  id?: number
+  url?: string
+  reason?: string
+}
+
 export type IssueState = 'open' | 'closed' | 'all'
 
 export class GithubError extends Error {
@@ -208,6 +232,7 @@ export class GithubClient {
     if (res.status === 401) throw new GithubError('Invalid or missing GitHub token', 401)
     if (res.status === 403) throw new GithubError('GitHub rate limit exceeded or forbidden', 403)
     if (!res.ok) throw new GithubError(`GitHub API error ${res.status}`, res.status)
+    if (res.status === 204) return undefined as T
     return (await res.json()) as T
   }
 
@@ -643,6 +668,83 @@ export class GithubClient {
     } catch (error) {
       if (error instanceof GithubError && (error.status === 422 || error.status === 409)) {
         return { ok: false, path, reason: 'Could not write the file (validation failed or the branch has conflicts).' }
+      }
+      throw error
+    }
+  }
+
+  async getReadme(owner: string, repo: string, options: { ref?: string; signal?: AbortSignal } = {}): Promise<ReadmeInfo> {
+    try {
+      const query = options.ref ? `?ref=${encodeURIComponent(options.ref)}` : ''
+      const data = await this.request<{ content: string; encoding: string; size: number; html_url: string }>(
+        `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/readme${query}`,
+        { signal: options.signal },
+      )
+      const content = data.encoding === 'base64' ? Buffer.from(data.content, 'base64').toString('utf8') : data.content
+      return { found: true, content, size: data.size, url: data.html_url }
+    } catch (error) {
+      if (error instanceof GithubError && error.status === 404) {
+        return { found: false }
+      }
+      throw error
+    }
+  }
+
+  async listTags(owner: string, repo: string, options: { perPage?: number; signal?: AbortSignal } = {}): Promise<TagItem[]> {
+    const params = new URLSearchParams({
+      per_page: String(Math.max(1, Math.min(options.perPage ?? 20, 100))),
+    })
+    const data = await this.request<Array<{ name: string; commit: { sha: string } }>>(
+      `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/tags?${params}`,
+      { signal: options.signal },
+    )
+    return data.map(item => ({ name: item.name, commitSha: item.commit.sha.slice(0, 7) }))
+  }
+
+  async starRepo(owner: string, repo: string, signal?: AbortSignal): Promise<StarResult> {
+    try {
+      await this.request<unknown>(`/user/starred/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`, { method: 'PUT', signal })
+      return { ok: true }
+    } catch (error) {
+      if (error instanceof GithubError && error.status === 404) {
+        return { ok: false, reason: 'Repository not found.' }
+      }
+      throw error
+    }
+  }
+
+  async unstarRepo(owner: string, repo: string, signal?: AbortSignal): Promise<StarResult> {
+    try {
+      await this.request<unknown>(`/user/starred/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`, { method: 'DELETE', signal })
+      return { ok: true }
+    } catch (error) {
+      if (error instanceof GithubError && error.status === 404) {
+        return { ok: false, reason: 'Repository not found or not starred.' }
+      }
+      throw error
+    }
+  }
+
+  async createRelease(owner: string, repo: string, input: { tagName: string; name?: string; body?: string; draft?: boolean; prerelease?: boolean }, signal?: AbortSignal): Promise<ReleaseCreateResult> {
+    try {
+      const data = await this.request<{ id: number; html_url: string }>(
+        `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/releases`,
+        {
+          method: 'POST',
+          body: {
+            tag_name: input.tagName,
+            name: input.name ?? input.tagName,
+            body: input.body ?? '',
+            draft: input.draft ?? false,
+            prerelease: input.prerelease ?? false,
+          },
+          signal,
+        },
+      )
+      return { ok: true, id: data.id, url: data.html_url }
+    } catch (error) {
+      if (error instanceof GithubError && error.status === 422) {
+        return { ok: false, reason: 'Validation failed (e.g. the tag does not exist or the release already exists).' }
       }
       throw error
     }
