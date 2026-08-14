@@ -41,6 +41,9 @@ npm install dsh-tool-github
 | `github_list_prs` | 列出仓库 PR（state 过滤，上限 20） | 否 |
 | `github_get_file` | 读取仓库文件内容（支持分支/ref，base64 解码） | 否 |
 | `github_list_commits` | 查看最近提交（分支/作者过滤，上限 30） | 否 |
+| `github_create_issue` | 创建 issue（title 必填，body/labels 可选） | 是 |
+| `github_comment_issue` | 评论 issue 或 PR | 是 |
+| `github_update_issue` | 打开/关闭 issue | 是 |
 | `github_create_pr_draft` | 创建 draft PR（head/base/title/body） | 是 |
 
 ### 行为约定（遵循官方 execute 契约）

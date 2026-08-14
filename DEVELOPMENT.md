@@ -121,6 +121,23 @@ v0.2 方向：扩展 GitHub 开发助手高频场景，全部只读（延续安�
 
 - 验收：typecheck ✅；30/30 单测（含错误路径）；README 工具表同步；本文档日志更新。
 
+### 阶段 6：写操作工具（2026-08-14 新增，需 token）
+
+v0.3 方向：让 Agent 能回写 GitHub——创建 issue、评论、开关 issue。**写操作一律需要 token**；未配置 token 时返回明确业务值（不抛错），422 映射业务失败值。
+
+| 工具 | 功能 | 状态 |
+|---|---|---|
+| `github_create_issue` | 创建 issue（title 必填，body/labels 可选） | ✅ 已实现 |
+| `github_comment_issue` | 评论 issue 或 PR（按 issue number） | ✅ 已实现 |
+| `github_update_issue` | 打开/关闭 issue（state 切换） | ✅ 已实现 |
+
+安全设计：
+- 未配置 token → 返回 `{ ok: false, reason: 'requires token' }` 业务值。
+- 422（校验失败/已存在）→ 业务失败值；401/403 → 抛错。
+- 工具描述明确标注「写操作、需要 token、影响远程仓库」。
+
+- 验收：typecheck ✅；38/38 单测（成功 + 422/404 + 未配置 token）；README 工具表同步；本文档日志更新。
+
 ## 5. 开发日志（每次推进后追加，带时间戳）
 
 ### 2026-08-14（阶段 5：高频工具扩展完成）
@@ -132,6 +149,19 @@ v0.2 方向：扩展 GitHub 开发助手高频场景，全部只读（延续安�
 - 测试：client +4（列表映射/过滤参数/编码），tools +4（8 工具注册齐/get_file 404 与 base64/limit 30/presentCall）；共 30/30 通过。
 - 踩坑记录：TS 字符串里 `\n` 是字面反斜杠+n，要用 `\n` 转义才表示换行（client.ts 的 commit 主题切分与测试 mock 各踩一次）；Python 写文件时需注意双重转义。
 - 验证：typecheck ✅、vitest 30/30 ✅、build ✅；README 中英文工具表同步（8 工具）。
+### 2026-08-14（阶段 6：写操作工具完成，共 11 个工具）
+- 新增 3 个写操作工具（均需 token；无 token 返回 `{ ok: false, reason: '... token ...' }` 业务值，不抛错）：
+  - `github_create_issue`：POST /issues（title/body/labels；422 → 业务失败值）。
+  - `github_comment_issue`：POST /issues/{n}/comments（body 必填）。
+  - `github_update_issue`：PATCH /issues/{n}（state: open|closed；404 → 业务失败值）。
+- 客户端新增 `createIssue`/`commentOnIssue`/`updateIssue`（共用 request 的 method/body 支持）。
+- 安全设计：工具描述显式标注「WRITE operation、需要 token、影响远程仓库」；presentCall 用 `kind:'edit'`，update 的标题随目标状态变化（Close/Open issue #n）。
+- 测试：client +4（POST body 断言/422/评论端点/PATCH+404），tools +4（无 token 业务值×3、有 token 成功、presentCall×2）；共 38/38 通过。
+- 验证：typecheck ✅、vitest 38/38 ✅、build ✅；README 中英文工具表同步（11 工具）。
+### 2026-08-14（阶段 6：启动）
+- 规划写操作工具三件套（见上表），延续「业务失败用规范值、基础设施错误抛错」契约。
+- 安全基线：写操作必须有 token；无 token 返回明确业务值；描述中标注副作用。
+
 ### 2026-08-14（阶段 5：启动）
 - 仓库话题扩充：`dsh-plugin`、`deepseek-harness`、`cordis`、`github`、`agent`（5 个），提升 GitHub 曝光。
 - 规划阶段 5 三个高频只读工具（见上表）：PR 列表、文件读取、提交历史。

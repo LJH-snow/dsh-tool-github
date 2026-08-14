@@ -454,6 +454,130 @@ export function createTools(client: GithubClient) {
     }),
 
     defineTool({
+      name: 'github_create_issue',
+      description: 'Create an issue in a GitHub repository. WRITE operation: requires a configured token and affects the remote repository.',
+      parameters: {
+        owner: { type: 'string', required: true, description: 'Repository owner' },
+        repo: { type: 'string', required: true, description: 'Repository name' },
+        title: { type: 'string', required: true, description: 'Issue title' },
+        body: { type: 'string', description: 'Issue body (Markdown)' },
+        labels: { type: 'array', items: { type: 'string' }, description: 'Label names to apply' },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            ok: { type: 'boolean', description: 'Whether the issue was created' },
+            number: { type: 'integer', description: 'Issue number when created' },
+            url: { type: 'string', description: 'Issue URL when created' },
+            reason: { type: 'string', description: 'Explanation when not created' },
+          },
+        },
+        render: (_args, value) => {
+          if (value.ok) return [{ type: 'text', text: `Created issue #${value.number}: ${value.url}` }]
+          return [{ type: 'text', text: `Could not create the issue: ${value.reason}` }]
+        },
+      },
+      presentCall(args): ToolCallView {
+        return { card: 'generic', title: `Create issue: ${args.title}`, kind: 'edit' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { ok?: boolean; number?: number; url?: string; reason?: string }
+        if (v.ok) return { card: 'generic', title: `Issue #${v.number} created`, content: [{ type: 'text', text: v.url ?? '' }] }
+        return { card: 'generic', title: 'Create issue failed', content: [{ type: 'text', text: v.reason ?? 'Unknown' }] }
+      },
+      async execute(args, exec) {
+        if (!client.hasToken()) {
+          return { ok: false, reason: 'Creating an issue requires a GitHub token. Configure the plugin with a token.' }
+        }
+        return client.createIssue(args.owner, args.repo, { title: args.title, body: args.body, labels: args.labels }, exec.signal)
+      },
+    }),
+
+    defineTool({
+      name: 'github_comment_issue',
+      description: 'Comment on a GitHub issue or pull request. WRITE operation: requires a configured token and affects the remote repository.',
+      parameters: {
+        owner: { type: 'string', required: true, description: 'Repository owner' },
+        repo: { type: 'string', required: true, description: 'Repository name' },
+        issueNumber: { type: 'integer', required: true, description: 'Issue or PR number' },
+        body: { type: 'string', required: true, description: 'Comment body (Markdown)' },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            ok: { type: 'boolean', description: 'Whether the comment was posted' },
+            number: { type: 'integer', description: 'Comment id when posted' },
+            url: { type: 'string', description: 'Comment URL when posted' },
+            reason: { type: 'string', description: 'Explanation when not posted' },
+          },
+        },
+        render: (_args, value) => {
+          if (value.ok) return [{ type: 'text', text: `Posted comment: ${value.url}` }]
+          return [{ type: 'text', text: `Could not post the comment: ${value.reason}` }]
+        },
+      },
+      presentCall(args): ToolCallView {
+        return { card: 'generic', title: `Comment on #${args.issueNumber}`, kind: 'edit' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { ok?: boolean; url?: string; reason?: string }
+        if (v.ok) return { card: 'generic', title: 'Comment posted', content: [{ type: 'text', text: v.url ?? '' }] }
+        return { card: 'generic', title: 'Comment failed', content: [{ type: 'text', text: v.reason ?? 'Unknown' }] }
+      },
+      async execute(args, exec) {
+        if (!client.hasToken()) {
+          return { ok: false, reason: 'Commenting requires a GitHub token. Configure the plugin with a token.' }
+        }
+        return client.commentOnIssue(args.owner, args.repo, args.issueNumber, args.body, exec.signal)
+      },
+    }),
+
+    defineTool({
+      name: 'github_update_issue',
+      description: 'Open or close a GitHub issue. WRITE operation: requires a configured token and affects the remote repository.',
+      parameters: {
+        owner: { type: 'string', required: true, description: 'Repository owner' },
+        repo: { type: 'string', required: true, description: 'Repository name' },
+        issueNumber: { type: 'integer', required: true, description: 'Issue number' },
+        state: { type: 'string', enum: ['open', 'closed'], required: true, description: 'Target state' },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            ok: { type: 'boolean', description: 'Whether the issue state was updated' },
+            number: { type: 'integer', description: 'Issue number' },
+            url: { type: 'string', description: 'Issue URL' },
+            reason: { type: 'string', description: 'Explanation when not updated' },
+          },
+        },
+        render: (_args, value) => {
+          if (value.ok) return [{ type: 'text', text: `Updated issue #${value.number}: ${value.url}` }]
+          return [{ type: 'text', text: `Could not update the issue: ${value.reason}` }]
+        },
+      },
+      presentCall(args): ToolCallView {
+        return { card: 'generic', title: `${args.state === 'closed' ? 'Close' : 'Open'} issue #${args.issueNumber}`, kind: 'edit' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { ok?: boolean; number?: number; url?: string; reason?: string }
+        if (v.ok) return { card: 'generic', title: `Issue #${v.number} updated`, content: [{ type: 'text', text: v.url ?? '' }] }
+        return { card: 'generic', title: 'Update issue failed', content: [{ type: 'text', text: v.reason ?? 'Unknown' }] }
+      },
+      async execute(args, exec) {
+        if (!client.hasToken()) {
+          return { ok: false, reason: 'Updating an issue requires a GitHub token. Configure the plugin with a token.' }
+        }
+        return client.updateIssue(args.owner, args.repo, args.issueNumber, args.state, exec.signal)
+      },
+    }),
+
+    defineTool({
       name: 'github_create_pr_draft',
       description: 'Create a draft pull request on GitHub. Returns the PR number and URL when created.',
       parameters: {

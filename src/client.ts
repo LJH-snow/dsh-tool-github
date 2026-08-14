@@ -79,6 +79,13 @@ export interface CommitItem {
   url: string
 }
 
+export interface IssueWriteResult {
+  ok: boolean
+  number?: number
+  url?: string
+  reason?: string
+}
+
 export type IssueState = 'open' | 'closed' | 'all'
 
 export class GithubError extends Error {
@@ -293,6 +300,55 @@ export class GithubClient {
       date: item.commit.author.date,
       url: item.html_url,
     }))
+  }
+
+  async createIssue(owner: string, repo: string, input: { title: string; body?: string; labels?: string[] }, signal?: AbortSignal): Promise<IssueWriteResult> {
+    try {
+      const data = await this.request<{ number: number; html_url: string }>(
+        `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/issues`,
+        {
+          method: 'POST',
+          body: { title: input.title, body: input.body ?? '', labels: input.labels ?? [] },
+          signal,
+        },
+      )
+      return { ok: true, number: data.number, url: data.html_url }
+    } catch (error) {
+      if (error instanceof GithubError && error.status === 422) {
+        return { ok: false, reason: 'Validation failed (e.g. an issue with this title already exists, or an invalid label).' }
+      }
+      throw error
+    }
+  }
+
+  async commentOnIssue(owner: string, repo: string, issueNumber: number, body: string, signal?: AbortSignal): Promise<IssueWriteResult> {
+    try {
+      const data = await this.request<{ id: number; html_url: string }>(
+        `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/issues/${issueNumber}/comments`,
+        { method: 'POST', body: { body }, signal },
+      )
+      return { ok: true, number: data.id, url: data.html_url }
+    } catch (error) {
+      if (error instanceof GithubError && error.status === 422) {
+        return { ok: false, reason: 'Comment validation failed (e.g. the issue is locked or the comment is empty).' }
+      }
+      throw error
+    }
+  }
+
+  async updateIssue(owner: string, repo: string, issueNumber: number, state: 'open' | 'closed', signal?: AbortSignal): Promise<IssueWriteResult> {
+    try {
+      const data = await this.request<{ number: number; html_url: string }>(
+        `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/issues/${issueNumber}`,
+        { method: 'PATCH', body: { state }, signal },
+      )
+      return { ok: true, number: data.number, url: data.html_url }
+    } catch (error) {
+      if (error instanceof GithubError && error.status === 404) {
+        return { ok: false, reason: 'Issue not found.' }
+      }
+      throw error
+    }
   }
 
   async createPrDraft(owner: string, repo: string, input: { title: string; head: string; base: string; body?: string }, signal?: AbortSignal): Promise<PrDraftResult> {

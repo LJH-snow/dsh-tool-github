@@ -16,6 +16,8 @@ const tools = () => Object.fromEntries(createTools(new GithubClient({ fetchImpl:
 describe('tool definitions', () => {
   it('registers the planned tools', () => {
     expect(Object.keys(tools()).sort()).toEqual([
+      'github_comment_issue',
+      'github_create_issue',
       'github_create_pr_draft',
       'github_get_file',
       'github_get_repo',
@@ -24,6 +26,7 @@ describe('tool definitions', () => {
       'github_list_prs',
       'github_search_code',
       'github_search_repos',
+      'github_update_issue',
     ])
   })
 
@@ -116,9 +119,11 @@ describe('tool presentation (pure render intents)', () => {
 })
 
 describe('extended tools (stage 5)', () => {
-  it('registers all eight tools', () => {
+  it('registers all eleven tools', () => {
     const names = Object.keys(Object.fromEntries(createTools(new GithubClient()).map(t => [t.name, t]))).sort()
     expect(names).toEqual([
+      'github_comment_issue',
+      'github_create_issue',
       'github_create_pr_draft',
       'github_get_file',
       'github_get_repo',
@@ -127,6 +132,7 @@ describe('extended tools (stage 5)', () => {
       'github_list_prs',
       'github_search_code',
       'github_search_repos',
+      'github_update_issue',
     ])
   })
 
@@ -160,5 +166,40 @@ describe('extended tools (stage 5)', () => {
   it('github_list_prs presentCall uses search kind', () => {
     const t = createTools(new GithubClient()).find(t => t.name === 'github_list_prs') as any
     expect(t.presentCall({ owner: 'a', repo: 'b' })).toMatchObject({ card: 'generic', kind: 'search' })
+  })
+})
+
+describe('write tools (stage 6)', () => {
+  it('write tools return a clear business value without a token', async () => {
+    const defs = Object.fromEntries(createTools(new GithubClient({ fetchImpl: vi.fn() })).map(t => [t.name, t]))
+    const create = await defs['github_create_issue'].execute({ owner: 'a', repo: 'b', title: 'x' }, exec())
+    expect(create).toMatchObject({ ok: false })
+    expect(create.reason).toContain('token')
+
+    const comment = await defs['github_comment_issue'].execute({ owner: 'a', repo: 'b', issueNumber: 1, body: 'hi' }, exec())
+    expect(comment).toMatchObject({ ok: false })
+
+    const update = await defs['github_update_issue'].execute({ owner: 'a', repo: 'b', issueNumber: 1, state: 'closed' }, exec())
+    expect(update).toMatchObject({ ok: false })
+  })
+
+  it('write tools proceed when a token is configured', async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse(201, { number: 3, html_url: 'https://github.com/a/b/issues/3' }))
+    const client = new GithubClient({ token: 'ghp_test', fetchImpl })
+    const defs = Object.fromEntries(createTools(client).map(t => [t.name, t]))
+    const result = await defs['github_create_issue'].execute({ owner: 'a', repo: 'b', title: 'x' }, exec())
+    expect(result).toEqual({ ok: true, number: 3, url: 'https://github.com/a/b/issues/3' })
+  })
+
+  it('github_create_issue presentCall uses edit kind and shows the title', () => {
+    const t = createTools(new GithubClient()).find(t => t.name === 'github_create_issue') as any
+    const call = t.presentCall({ owner: 'a', repo: 'b', title: 'Fix bug' })
+    expect(call).toMatchObject({ card: 'generic', kind: 'edit', title: 'Create issue: Fix bug' })
+  })
+
+  it('github_update_issue presentCall reflects the target state', () => {
+    const t = createTools(new GithubClient()).find(t => t.name === 'github_update_issue') as any
+    expect(t.presentCall({ owner: 'a', repo: 'b', issueNumber: 5, state: 'closed' })).toMatchObject({ title: 'Close issue #5' })
+    expect(t.presentCall({ owner: 'a', repo: 'b', issueNumber: 5, state: 'open' })).toMatchObject({ title: 'Open issue #5' })
   })
 })

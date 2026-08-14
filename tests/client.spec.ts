@@ -164,3 +164,46 @@ describe('GithubClient extended tools', () => {
     expect(commits[0]).toMatchObject({ sha: 'abcdef1', message: 'Initial commit', author: 'Alice' })
   })
 })
+
+describe('GithubClient write operations', () => {
+  it('createIssue POSTs title/body/labels and returns ok', async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse(201, { number: 7, html_url: 'https://github.com/a/b/issues/7' }))
+    const client = new GithubClient({ token: 'ghp_test', fetchImpl })
+    const result = await client.createIssue('a', 'b', { title: 'Bug', body: 'details', labels: ['bug'] })
+    const [, init] = fetchImpl.mock.calls[0] as [string, RequestInit]
+    expect(init.method).toBe('POST')
+    expect(JSON.parse(String(init.body))).toEqual({ title: 'Bug', body: 'details', labels: ['bug'] })
+    expect(result).toEqual({ ok: true, number: 7, url: 'https://github.com/a/b/issues/7' })
+  })
+
+  it('createIssue maps 422 to a business failure value', async () => {
+    const client = new GithubClient({ token: 'ghp_test', fetchImpl: vi.fn(async () => jsonResponse(422, {})) })
+    const result = await client.createIssue('a', 'b', { title: 'Duplicate' })
+    expect(result.ok).toBe(false)
+    expect(result.reason).toBeTruthy()
+  })
+
+  it('commentOnIssue POSTs to the comments endpoint', async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse(201, { id: 99, html_url: 'https://github.com/a/b/issues/7#issuecomment-99' }))
+    const client = new GithubClient({ token: 'ghp_test', fetchImpl })
+    const result = await client.commentOnIssue('a', 'b', 7, 'LGTM')
+    const [url, init] = fetchImpl.mock.calls[0] as [string, RequestInit]
+    expect(url).toContain('/repos/a/b/issues/7/comments')
+    expect(JSON.parse(String(init.body))).toEqual({ body: 'LGTM' })
+    expect(result).toEqual({ ok: true, number: 99, url: 'https://github.com/a/b/issues/7#issuecomment-99' })
+  })
+
+  it('updateIssue PATCHes the state and maps 404', async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse(200, { number: 7, html_url: 'https://github.com/a/b/issues/7' }))
+    const client = new GithubClient({ token: 'ghp_test', fetchImpl })
+    const result = await client.updateIssue('a', 'b', 7, 'closed')
+    const [, init] = fetchImpl.mock.calls[0] as [string, RequestInit]
+    expect(init.method).toBe('PATCH')
+    expect(JSON.parse(String(init.body))).toEqual({ state: 'closed' })
+    expect(result).toEqual({ ok: true, number: 7, url: 'https://github.com/a/b/issues/7' })
+
+    const client404 = new GithubClient({ token: 'ghp_test', fetchImpl: vi.fn(async () => jsonResponse(404, {})) })
+    const missing = await client404.updateIssue('a', 'b', 999, 'closed')
+    expect(missing).toMatchObject({ ok: false })
+  })
+})
