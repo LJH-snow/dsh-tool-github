@@ -158,6 +158,18 @@ v1.0 方向：补齐 GitHub 开发助手剩余高频场景，形成完整工具�
 - [x] `npm pack` 产物确认（见阶段 4 记录；本阶段再验证）
 - [ ] npm 发布（需用户登录 npm）— 未完成，待用户 `npm adduser`
 
+### 阶段 8：内容与评论工具（2026-08-14 新增）
+
+v0.4 方向：补齐「查看 issue 详情、issue 评论、PR 评论」三个高频只读场景，配合已有的写操作形成完整闭环。
+
+| 工具 | 功能 | 状态 |
+|---|---|---|
+| `github_get_issue` | 查看单个 issue 详情（标题、状态、作者、body、标签） | ✅ 已实现 |
+| `github_list_issue_comments` | 列出 issue 的评论（作者、时间、body） | ✅ 已实现 |
+| `github_list_pr_comments` | 列出 PR 的 review 评论（作者、时间、body） | ✅ 已实现 |
+
+- 验收：typecheck ✅；50/50 单测（含 404 业务值、limit 钳制、presentCall）；README 工具表同步；本文档日志更新。
+
 ## 5. 开发日志（每次推进后追加，带时间戳）
 
 ### 2026-08-14（阶段 5：高频工具扩展完成）
@@ -186,6 +198,19 @@ v1.0 方向：补齐 GitHub 开发助手剩余高频场景，形成完整工具�
 - 测试：client +5（PUT body/405/409/404 映射、releases、branches），tools +4（merge 无 token、merge 成功、只读免 token×2、presentCall×3）；共 47/47 通过。
 - 验证：typecheck ✅、vitest 47/47 ✅、build ✅；README 中英文同步（14 工具）。
 - 代码功能全部完成；剩余 npm 发布待用户登录 npm（`npm adduser`）。
+### 2026-08-14（阶段 8：内容与评论工具完成，共 17 个工具）
+- 新增 3 个只读工具：
+  - `github_get_issue`：issue 详情（标题/状态/作者/标签/body/URL）；404 → `{found:false}` 业务值。
+  - `github_list_issue_comments`：issue 评论列表（作者/时间/body，上限 30）。
+  - `github_list_pr_comments`：PR review 评论列表（作者/时间/body，上限 30）。
+- 客户端新增 `getIssue`/`listIssueComments`/`listPrComments`（/issues/{n}、/issues/{n}/comments、/pulls/{n}/comments）。
+- 测试：client +3（详情映射/两评论端点），tools +4（404 业务值、免 token 成功、limit 30、presentCall×3）；共 50/50 通过。
+- 验证：typecheck ✅、vitest 50/50 ✅、build ✅；README 中英文同步（17 工具）。
+- 发布状态：npm 发布暂缓——账号 libai168 开启 2FA，npm 新政策（2026-08）禁止创建 bypass-2FA token，且 scope 下无包导致 All packages token 创建失败；正路是网页创建「单包 @libai168/dsh-tool-github + 2FA bypass」的 granular token 或 trusted publishing。
+### 2026-08-14（阶段 8：启动）
+- 规划三个只读内容工具（见上表）。全部无需 token。
+- 同步 README 发布说明：npm 发布需「2FA bypass 的 granular token 或 trusted publishing」（记录本次发布受阻原因：账号开启 2FA + npm 新政策限制 bypass-2FA token 创建 + scope 下无包导致 All packages token 创建失败）。
+
 ### 2026-08-14（阶段 7：启动）
 - 规划收官三工具：PR 合并（写）、发布列表、分支列表。
 - 目标：14 个工具完整覆盖 GitHub 开发助手高频场景 → 发布 npm v1.0。

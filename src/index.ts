@@ -733,6 +733,172 @@ export function createTools(client: GithubClient) {
     }),
 
     defineTool({
+      name: 'github_get_issue',
+      description: 'Get details of a single GitHub issue: title, state, author, labels, body, and creation time.',
+      parameters: {
+        owner: { type: 'string', required: true, description: 'Repository owner' },
+        repo: { type: 'string', required: true, description: 'Repository name' },
+        issueNumber: { type: 'integer', required: true, description: 'Issue number' },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            found: { type: 'boolean', description: 'Whether the issue exists' },
+            number: { type: 'integer', description: 'Issue number' },
+            title: { type: 'string', description: 'Issue title' },
+            state: { type: 'string', description: 'Issue state' },
+            author: { type: 'string', description: 'Author login' },
+            createdAt: { type: 'string', description: 'ISO creation timestamp' },
+            labels: { type: 'array', items: { type: 'string' }, description: 'Label names' },
+            body: { type: 'string', description: 'Issue body (Markdown)' },
+            url: { type: 'string', description: 'Issue URL' },
+          },
+        },
+        render: (_args, value) => {
+          if (!value.found) return [{ type: 'text', text: 'Issue not found.' }]
+          const labels = value.labels && value.labels.length > 0 ? ` [${value.labels.join(', ')}]` : ''
+          const body = value.body ? `\n\n${value.body}` : ''
+          return [{ type: 'text', text: `#${value.number} ${value.title} (${value.state}, @${value.author})${labels}${body}` }]
+        },
+      },
+      presentCall(args): ToolCallView {
+        return { card: 'generic', title: `Issue #${args.issueNumber}`, kind: 'read' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { found?: boolean; number?: number; title?: string; state?: string }
+        if (!v.found) return { card: 'generic', title: 'Issue not found' }
+        return { card: 'generic', title: `#${v.number} ${v.title}`, content: [{ type: 'text', text: `state: ${v.state}` }] }
+      },
+      async execute(args, exec) {
+        try {
+          const issue = await client.getIssue(args.owner, args.repo, args.issueNumber, exec.signal)
+          return { found: true, ...issue }
+        } catch (error) {
+          if (error instanceof GithubError && error.status === 404) {
+            return { found: false }
+          }
+          throw error
+        }
+      },
+    }),
+
+    defineTool({
+      name: 'github_list_issue_comments',
+      description: 'List comments on a GitHub issue: author, time, and body.',
+      parameters: {
+        owner: { type: 'string', required: true, description: 'Repository owner' },
+        repo: { type: 'string', required: true, description: 'Repository name' },
+        issueNumber: { type: 'integer', required: true, description: 'Issue number' },
+        limit: { type: 'integer', description: 'Maximum results, 1-30 (default 10)' },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            items: {
+              type: 'array',
+              items: {
+                type: 'object',
+                additionalProperties: false,
+                properties: {
+                  id: { type: 'integer', description: 'Comment id' },
+                  author: { type: 'string', description: 'Author login' },
+                  createdAt: { type: 'string', description: 'ISO creation timestamp' },
+                  body: { type: 'string', description: 'Comment body' },
+                  url: { type: 'string', description: 'Comment URL' },
+                },
+              },
+            },
+          },
+        },
+        render: (_args, value) => {
+          const items = value.items ?? []
+          if (items.length === 0) return [{ type: 'text', text: 'No comments found.' }]
+          const lines = items.map(item => `@${item.author} (${item.createdAt}): ${(item.body ?? '').slice(0, 200)}`)
+          return [{ type: 'text', text: lines.join('\n\n') }]
+        },
+      },
+      presentCall(args): ToolCallView {
+        return { card: 'generic', title: `Comments on #${args.issueNumber}`, kind: 'search' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { items?: Array<{ author: string }> }
+        const items = v.items ?? []
+        if (items.length === 0) return { card: 'generic', title: 'No comments' }
+        return {
+          card: 'generic',
+          title: `${items.length} comment(s)`,
+          content: [{ type: 'text', text: items.map(i => `@${i.author}`).join('\n') }],
+        }
+      },
+      async execute(args, exec) {
+        const limit = args.limit === undefined ? 10 : Math.max(1, Math.min(args.limit, 30))
+        const items = await client.listIssueComments(args.owner, args.repo, args.issueNumber, { perPage: limit, signal: exec.signal })
+        return { items }
+      },
+    }),
+
+    defineTool({
+      name: 'github_list_pr_comments',
+      description: 'List review comments on a GitHub pull request: author, time, and body.',
+      parameters: {
+        owner: { type: 'string', required: true, description: 'Repository owner' },
+        repo: { type: 'string', required: true, description: 'Repository name' },
+        prNumber: { type: 'integer', required: true, description: 'Pull request number' },
+        limit: { type: 'integer', description: 'Maximum results, 1-30 (default 10)' },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            items: {
+              type: 'array',
+              items: {
+                type: 'object',
+                additionalProperties: false,
+                properties: {
+                  id: { type: 'integer', description: 'Comment id' },
+                  author: { type: 'string', description: 'Author login' },
+                  createdAt: { type: 'string', description: 'ISO creation timestamp' },
+                  body: { type: 'string', description: 'Comment body' },
+                  url: { type: 'string', description: 'Comment URL' },
+                },
+              },
+            },
+          },
+        },
+        render: (_args, value) => {
+          const items = value.items ?? []
+          if (items.length === 0) return [{ type: 'text', text: 'No PR comments found.' }]
+          const lines = items.map(item => `@${item.author} (${item.createdAt}): ${(item.body ?? '').slice(0, 200)}`)
+          return [{ type: 'text', text: lines.join('\n\n') }]
+        },
+      },
+      presentCall(args): ToolCallView {
+        return { card: 'generic', title: `PR #${args.prNumber} comments`, kind: 'search' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { items?: Array<{ author: string }> }
+        const items = v.items ?? []
+        if (items.length === 0) return { card: 'generic', title: 'No PR comments' }
+        return {
+          card: 'generic',
+          title: `${items.length} PR comment(s)`,
+          content: [{ type: 'text', text: items.map(i => `@${i.author}`).join('\n') }],
+        }
+      },
+      async execute(args, exec) {
+        const limit = args.limit === undefined ? 10 : Math.max(1, Math.min(args.limit, 30))
+        const items = await client.listPrComments(args.owner, args.repo, args.prNumber, { perPage: limit, signal: exec.signal })
+        return { items }
+      },
+    }),
+
+    defineTool({
       name: 'github_create_pr_draft',
       description: 'Create a draft pull request on GitHub. Returns the PR number and URL when created.',
       parameters: {

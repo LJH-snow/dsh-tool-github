@@ -9,7 +9,7 @@ Built on the official "everything is a plugin" architecture via `ctx.tools.regis
 ## Install
 
 ```sh
-npm install dsh-tool-github
+npm install @libai168/dsh-tool-github
 ```
 
 Requires `@deepseek-ai/cordis` (^4.0.1) and `@deepseek-ai/dsh-tools` (^0.1.0-rc.6) as peer dependencies, provided by the host dsh runtime.
@@ -47,6 +47,9 @@ Full example: [examples/cordis.yml](examples/cordis.yml).
 | `github_merge_pr` | Merge a PR (merge/squash/rebase; requires token) | yes |
 | `github_list_releases` | List releases (tag, draft/prerelease, author) | no |
 | `github_list_branches` | List branches with latest SHAs | no |
+| `github_get_issue` | Get issue details (title, state, author, labels, body) | no |
+| `github_list_issue_comments` | List issue comments (author, time, body) | no |
+| `github_list_pr_comments` | List PR review comments (author, time, body) | no |
 | `github_create_pr_draft` | Create a draft PR (head/base/title/body) | yes |
 
 ### Behavior contract (per the official execute contract)
@@ -68,7 +71,7 @@ See [DEVELOPMENT.md](DEVELOPMENT.md) for plans and decisions.
 
 ## Publishing
 
-1. Rename the package in `package.json` to your scope (e.g. `@your-name/dsh-tool-github`) and update `repository`/`homepage`.
+1. The package is published under your npm scope: `@libai168/dsh-tool-github` (npm publishing requires a granular access token with **2FA bypass** enabled, or trusted publishing).
 2. `npm run build`, then `npm publish --access public`.
 3. Add the [`dsh-plugin`](https://github.com/topics/dsh-plugin) topic to your GitHub repo for ecosystem discovery.
 

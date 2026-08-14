@@ -1,5 +1,5 @@
 {
-  "name": "dsh-tool-github",
+  "name": "@libai168/dsh-tool-github",
   "description": "GitHub tools for DeepSeek Harness: repo lookup, issue listing, code search, and PR drafts",
   "version": "0.1.0",
   "type": "module",

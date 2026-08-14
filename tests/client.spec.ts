@@ -260,3 +260,41 @@ describe('GithubClient stage 7', () => {
     ])
   })
 })
+
+describe('GithubClient stage 8', () => {
+  it('getIssue maps the issue detail', async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse(200, {
+      number: 3, title: 'Bug', state: 'open', user: { login: 'alice' }, created_at: '2026-01-01T00:00:00Z',
+      labels: [{ name: 'bug' }], body: 'details', html_url: 'https://github.com/a/b/issues/3',
+    }))
+    const client = new GithubClient({ fetchImpl })
+    const issue = await client.getIssue('a', 'b', 3)
+    expect(issue).toEqual({
+      number: 3, title: 'Bug', state: 'open', author: 'alice', createdAt: '2026-01-01T00:00:00Z',
+      labels: ['bug'], body: 'details', url: 'https://github.com/a/b/issues/3',
+    })
+  })
+
+  it('listIssueComments hits the issue comments endpoint', async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse(200, [
+      { id: 1, user: { login: 'bob' }, created_at: '2026-01-02T00:00:00Z', body: 'hi', html_url: 'https://x/1' },
+    ]))
+    const client = new GithubClient({ fetchImpl })
+    const comments = await client.listIssueComments('a', 'b', 3, { perPage: 5 })
+    const [url] = fetchImpl.mock.calls[0] as [string]
+    expect(url).toContain('/repos/a/b/issues/3/comments?')
+    expect(url).toContain('per_page=5')
+    expect(comments[0]).toMatchObject({ id: 1, author: 'bob', body: 'hi' })
+  })
+
+  it('listPrComments hits the pulls comments endpoint', async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse(200, [
+      { id: 2, user: { login: 'carol' }, created_at: '2026-01-03T00:00:00Z', body: 'looks good', html_url: 'https://x/2' },
+    ]))
+    const client = new GithubClient({ fetchImpl })
+    const comments = await client.listPrComments('a', 'b', 9, { perPage: 5 })
+    const [url] = fetchImpl.mock.calls[0] as [string]
+    expect(url).toContain('/repos/a/b/pulls/9/comments?')
+    expect(comments[0]).toMatchObject({ id: 2, author: 'carol' })
+  })
+})

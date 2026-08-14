@@ -9,7 +9,7 @@
 ## 安装
 
 ```sh
-npm install dsh-tool-github
+npm install @libai168/dsh-tool-github
 ```
 
 需要 `@deepseek-ai/cordis`（^4.0.1）与 `@deepseek-ai/dsh-tools`（^0.1.0-rc.6）作为 peer 依赖，由宿主 dsh 运行时提供。
@@ -47,6 +47,9 @@ npm install dsh-tool-github
 | `github_merge_pr` | 合并 PR（merge/squash/rebase；需 token） | 是 |
 | `github_list_releases` | 列出发布（tag、draft/prerelease、作者） | 否 |
 | `github_list_branches` | 列出分支及最新 SHA | 否 |
+| `github_get_issue` | 查看 issue 详情（标题、状态、作者、标签、body） | 否 |
+| `github_list_issue_comments` | 列出 issue 评论（作者、时间、内容） | 否 |
+| `github_list_pr_comments` | 列出 PR review 评论（作者、时间、内容） | 否 |
 | `github_create_pr_draft` | 创建 draft PR（head/base/title/body） | 是 |
 
 ### 行为约定（遵循官方 execute 契约）
@@ -68,7 +71,7 @@ npm run build       # 构建到 lib/
 
 ## 发布与生态
 
-1. 将 `package.json` 的 `name` 改为你的 scope（如 `@your-name/dsh-tool-github`），并同步 `repository`、`homepage` 字段。
+1. 发布使用你的 npm scope：`@libai168/dsh-tool-github`（npm 发布需要启用 **2FA bypass** 的 granular access token，或 trusted publishing）。
 2. `npm run build` 后执行 `npm publish --access public`。
 3. 为你的 GitHub 仓库添加 [`dsh-plugin`](https://github.com/topics/dsh-plugin) topic，便于生态发现。
 

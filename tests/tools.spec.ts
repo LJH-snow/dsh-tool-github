@@ -20,10 +20,13 @@ describe('tool definitions', () => {
       'github_create_issue',
       'github_create_pr_draft',
       'github_get_file',
+      'github_get_issue',
       'github_get_repo',
       'github_list_branches',
       'github_list_commits',
+      'github_list_issue_comments',
       'github_list_issues',
+      'github_list_pr_comments',
       'github_list_prs',
       'github_list_releases',
       'github_merge_pr',
@@ -122,17 +125,20 @@ describe('tool presentation (pure render intents)', () => {
 })
 
 describe('extended tools (stage 5)', () => {
-  it('registers all fourteen tools', () => {
+  it('registers all seventeen tools', () => {
     const names = Object.keys(Object.fromEntries(createTools(new GithubClient()).map(t => [t.name, t]))).sort()
     expect(names).toEqual([
       'github_comment_issue',
       'github_create_issue',
       'github_create_pr_draft',
       'github_get_file',
+      'github_get_issue',
       'github_get_repo',
       'github_list_branches',
       'github_list_commits',
+      'github_list_issue_comments',
       'github_list_issues',
+      'github_list_pr_comments',
       'github_list_prs',
       'github_list_releases',
       'github_merge_pr',

@@ -101,6 +101,25 @@ export interface BranchItem {
   sha: string
 }
 
+export interface IssueDetail {
+  number: number
+  title: string
+  state: string
+  author: string
+  createdAt: string
+  labels: string[]
+  body: string
+  url: string
+}
+
+export interface CommentItem {
+  id: number
+  author: string
+  createdAt: string
+  body: string
+  url: string
+}
+
 export type IssueState = 'open' | 'closed' | 'all'
 
 export class GithubError extends Error {
@@ -436,5 +455,68 @@ export class GithubClient {
       { signal: options.signal },
     )
     return data.map(item => ({ name: item.name, sha: item.commit.sha.slice(0, 7) }))
+  }
+
+  async getIssue(owner: string, repo: string, issueNumber: number, signal?: AbortSignal): Promise<IssueDetail> {
+    const data = await this.request<{
+      number: number
+      title: string
+      state: string
+      user: { login: string } | null
+      created_at: string
+      labels: Array<{ name: string }>
+      body: string | null
+      html_url: string
+    }>(`/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/issues/${issueNumber}`, { signal })
+    return {
+      number: data.number,
+      title: data.title,
+      state: data.state,
+      author: data.user?.login ?? 'unknown',
+      createdAt: data.created_at,
+      labels: data.labels.map(label => label.name),
+      body: data.body ?? '',
+      url: data.html_url,
+    }
+  }
+
+  async listIssueComments(owner: string, repo: string, issueNumber: number, options: { perPage?: number; signal?: AbortSignal } = {}): Promise<CommentItem[]> {
+    const params = new URLSearchParams({
+      per_page: String(Math.max(1, Math.min(options.perPage ?? 20, 100))),
+    })
+    const data = await this.request<Array<{
+      id: number
+      user: { login: string } | null
+      created_at: string
+      body: string
+      html_url: string
+    }>>(`/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/issues/${issueNumber}/comments?${params}`, { signal: options.signal })
+    return data.map(item => ({
+      id: item.id,
+      author: item.user?.login ?? 'unknown',
+      createdAt: item.created_at,
+      body: item.body,
+      url: item.html_url,
+    }))
+  }
+
+  async listPrComments(owner: string, repo: string, prNumber: number, options: { perPage?: number; signal?: AbortSignal } = {}): Promise<CommentItem[]> {
+    const params = new URLSearchParams({
+      per_page: String(Math.max(1, Math.min(options.perPage ?? 20, 100))),
+    })
+    const data = await this.request<Array<{
+      id: number
+      user: { login: string } | null
+      created_at: string
+      body: string
+      html_url: string
+    }>>(`/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/pulls/${prNumber}/comments?${params}`, { signal: options.signal })
+    return data.map(item => ({
+      id: item.id,
+      author: item.user?.login ?? 'unknown',
+      createdAt: item.created_at,
+      body: item.body,
+      url: item.html_url,
+    }))
   }
 }
