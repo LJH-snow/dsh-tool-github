@@ -50,6 +50,35 @@ export interface PrDraftResult {
   reason?: string
 }
 
+export interface PrItem {
+  number: number
+  title: string
+  state: string
+  draft: boolean
+  author: string
+  headRef: string
+  baseRef: string
+  createdAt: string
+  url: string
+}
+
+export interface FileContent {
+  name: string
+  path: string
+  size: number
+  content: string
+  encoding: string
+  url: string
+}
+
+export interface CommitItem {
+  sha: string
+  message: string
+  author: string
+  date: string
+  url: string
+}
+
 export type IssueState = 'open' | 'closed' | 'all'
 
 export class GithubError extends Error {
@@ -195,6 +224,75 @@ export class GithubClient {
         url: item.html_url,
       })),
     }
+  }
+
+  async listPrs(owner: string, repo: string, options: { state?: 'open' | 'closed' | 'all'; perPage?: number; signal?: AbortSignal } = {}): Promise<PrItem[]> {
+    const params = new URLSearchParams({
+      state: options.state ?? 'open',
+      per_page: String(Math.max(1, Math.min(options.perPage ?? 10, 100))),
+    })
+    const data = await this.request<Array<{
+      number: number
+      title: string
+      state: string
+      draft: boolean
+      user: { login: string } | null
+      head: { ref: string }
+      base: { ref: string }
+      created_at: string
+      html_url: string
+    }>>(`/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/pulls?${params}`, { signal: options.signal })
+    return data.map(item => ({
+      number: item.number,
+      title: item.title,
+      state: item.state,
+      draft: item.draft,
+      author: item.user?.login ?? 'unknown',
+      headRef: item.head.ref,
+      baseRef: item.base.ref,
+      createdAt: item.created_at,
+      url: item.html_url,
+    }))
+  }
+
+  async getFile(owner: string, repo: string, path: string, options: { ref?: string; signal?: AbortSignal } = {}): Promise<FileContent> {
+    const query = options.ref ? `?ref=${encodeURIComponent(options.ref)}` : ''
+    const data = await this.request<{
+      name: string
+      path: string
+      size: number
+      content: string
+      encoding: string
+      html_url: string
+    }>(`/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/contents/${encodeURIComponent(path)}${query}`, { signal: options.signal })
+    return {
+      name: data.name,
+      path: data.path,
+      size: data.size,
+      content: data.content,
+      encoding: data.encoding,
+      url: data.html_url,
+    }
+  }
+
+  async listCommits(owner: string, repo: string, options: { branch?: string; author?: string; perPage?: number; signal?: AbortSignal } = {}): Promise<CommitItem[]> {
+    const params = new URLSearchParams({
+      per_page: String(Math.max(1, Math.min(options.perPage ?? 10, 100))),
+    })
+    if (options.branch) params.set('sha', options.branch)
+    if (options.author) params.set('author', options.author)
+    const data = await this.request<Array<{
+      sha: string
+      commit: { message: string; author: { name: string; date: string } }
+      html_url: string
+    }>>(`/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/commits?${params}`, { signal: options.signal })
+    return data.map(item => ({
+      sha: item.sha.slice(0, 7),
+      message: item.commit.message.split('\n')[0],
+      author: item.commit.author.name,
+      date: item.commit.author.date,
+      url: item.html_url,
+    }))
   }
 
   async createPrDraft(owner: string, repo: string, input: { title: string; head: string; base: string; body?: string }, signal?: AbortSignal): Promise<PrDraftResult> {

@@ -279,6 +279,181 @@ export function createTools(client: GithubClient) {
     }),
 
     defineTool({
+      name: 'github_list_prs',
+      description: 'List pull requests of a GitHub repository, optionally filtered by state. Returns number, title, author, branches, and draft status.',
+      parameters: {
+        owner: { type: 'string', required: true, description: 'Repository owner' },
+        repo: { type: 'string', required: true, description: 'Repository name' },
+        state: { type: 'string', enum: ['open', 'closed', 'all'], description: 'PR state (default open)' },
+        limit: { type: 'integer', description: 'Maximum results, 1-20 (default 10)' },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            items: {
+              type: 'array',
+              items: {
+                type: 'object',
+                additionalProperties: false,
+                properties: {
+                  number: { type: 'integer', description: 'PR number' },
+                  title: { type: 'string', description: 'PR title' },
+                  state: { type: 'string', description: 'PR state' },
+                  draft: { type: 'boolean', description: 'Whether this is a draft PR' },
+                  author: { type: 'string', description: 'Author login' },
+                  headRef: { type: 'string', description: 'Head branch' },
+                  baseRef: { type: 'string', description: 'Base branch' },
+                  createdAt: { type: 'string', description: 'ISO creation timestamp' },
+                  url: { type: 'string', description: 'PR URL' },
+                },
+              },
+            },
+          },
+        },
+        render: (_args, value) => {
+          const items = value.items ?? []
+          if (items.length === 0) return [{ type: 'text', text: 'No pull requests found.' }]
+          const lines = items.map(item => {
+            const draft = item.draft ? ' [draft]' : ''
+            return `#${item.number} ${item.title} (${item.state}, @${item.author})${draft} → ${item.headRef} -> ${item.baseRef}`
+          })
+          return [{ type: 'text', text: lines.join('\n') }]
+        },
+      },
+      presentCall(args): ToolCallView {
+        return { card: 'generic', title: `PRs: ${args.owner}/${args.repo}`, kind: 'search' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { items?: Array<{ number: number; title: string }> }
+        const items = v.items ?? []
+        if (items.length === 0) return { card: 'generic', title: 'No PRs' }
+        return {
+          card: 'generic',
+          title: `${items.length} PR(s)`,
+          content: [{ type: 'text', text: items.map(i => `#${i.number} ${i.title}`).join('\n') }],
+        }
+      },
+      async execute(args, exec) {
+        const limit = args.limit === undefined ? 10 : Math.max(1, Math.min(args.limit, 20))
+        const items = await client.listPrs(args.owner, args.repo, { state: args.state, perPage: limit, signal: exec.signal })
+        return { items }
+      },
+    }),
+
+    defineTool({
+      name: 'github_get_file',
+      description: 'Read a file from a GitHub repository (raw content, base64-decoded). Supports an optional branch or ref.',
+      parameters: {
+        owner: { type: 'string', required: true, description: 'Repository owner' },
+        repo: { type: 'string', required: true, description: 'Repository name' },
+        path: { type: 'string', required: true, description: 'File path in the repository, e.g. src/index.ts' },
+        ref: { type: 'string', description: 'Branch or commit ref (defaults to the default branch)' },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            found: { type: 'boolean', description: 'Whether the file exists' },
+            name: { type: 'string', description: 'File name' },
+            path: { type: 'string', description: 'File path' },
+            size: { type: 'integer', description: 'File size in bytes' },
+            content: { type: 'string', description: 'File content (decoded text)' },
+            url: { type: 'string', description: 'File URL' },
+          },
+        },
+        render: (_args, value) => {
+          if (!value.found) return [{ type: 'text', text: 'File not found.' }]
+          const content = value.content ?? ''
+          const preview = content.length > 2000 ? `${content.slice(0, 2000)}\n... [truncated, ${content.length} chars total]` : content
+          return [{ type: 'text', text: `${value.path} (${value.size} bytes)\n\n${preview}` }]
+        },
+      },
+      presentCall(args): ToolCallView {
+        return { card: 'generic', title: `Read ${args.path}`, kind: 'read', locations: [{ path: args.path }] }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { found?: boolean; path?: string; size?: number; content?: string }
+        if (!v.found) return { card: 'generic', title: 'File not found' }
+        return { card: 'generic', title: `${v.path} (${v.size} bytes)` }
+      },
+      async execute(args, exec) {
+        try {
+          const file = await client.getFile(args.owner, args.repo, args.path, { ref: args.ref, signal: exec.signal })
+          const content = file.encoding === 'base64'
+            ? Buffer.from(file.content, 'base64').toString('utf8')
+            : file.content
+          return { found: true, name: file.name, path: file.path, size: file.size, content, url: file.url }
+        } catch (error) {
+          if (error instanceof GithubError && error.status === 404) {
+            return { found: false }
+          }
+          throw error
+        }
+      },
+    }),
+
+    defineTool({
+      name: 'github_list_commits',
+      description: 'List recent commits of a GitHub repository, optionally filtered by branch and author.',
+      parameters: {
+        owner: { type: 'string', required: true, description: 'Repository owner' },
+        repo: { type: 'string', required: true, description: 'Repository name' },
+        branch: { type: 'string', description: 'Branch name (defaults to the default branch)' },
+        author: { type: 'string', description: 'GitHub username or email to filter by' },
+        limit: { type: 'integer', description: 'Maximum results, 1-30 (default 10)' },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            items: {
+              type: 'array',
+              items: {
+                type: 'object',
+                additionalProperties: false,
+                properties: {
+                  sha: { type: 'string', description: 'Short commit SHA' },
+                  message: { type: 'string', description: 'Commit subject' },
+                  author: { type: 'string', description: 'Author name' },
+                  date: { type: 'string', description: 'ISO commit timestamp' },
+                  url: { type: 'string', description: 'Commit URL' },
+                },
+              },
+            },
+          },
+        },
+        render: (_args, value) => {
+          const items = value.items ?? []
+          if (items.length === 0) return [{ type: 'text', text: 'No commits found.' }]
+          const lines = items.map(item => `${item.sha} ${item.message} (${item.author}, ${item.date})`)
+          return [{ type: 'text', text: lines.join('\n') }]
+        },
+      },
+      presentCall(args): ToolCallView {
+        return { card: 'generic', title: `Commits: ${args.owner}/${args.repo}`, kind: 'search' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { items?: Array<{ sha: string; message: string }> }
+        const items = v.items ?? []
+        if (items.length === 0) return { card: 'generic', title: 'No commits' }
+        return {
+          card: 'generic',
+          title: `${items.length} commit(s)`,
+          content: [{ type: 'text', text: items.map(i => `${i.sha} ${i.message}`).join('\n') }],
+        }
+      },
+      async execute(args, exec) {
+        const limit = args.limit === undefined ? 10 : Math.max(1, Math.min(args.limit, 30))
+        const items = await client.listCommits(args.owner, args.repo, { branch: args.branch, author: args.author, perPage: limit, signal: exec.signal })
+        return { items }
+      },
+    }),
+
+    defineTool({
       name: 'github_create_pr_draft',
       description: 'Create a draft pull request on GitHub. Returns the PR number and URL when created.',
       parameters: {

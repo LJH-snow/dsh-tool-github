@@ -109,7 +109,33 @@ pnpm vitest run
 pnpm build
 ```
 
+### 阶段 5：高频工具扩展（2026-08-14 新增）
+
+v0.2 方向：扩展 GitHub 开发助手高频场景，全部只读（延续安全定位）。
+
+| 工具 | 功能 | 状态 |
+|---|---|---|
+| `github_list_prs` | 列出仓库 PR（state 过滤，上限 20） | ✅ 已实现 |
+| `github_get_file` | 读取仓库文件内容（支持分支/ref，base64 解码） | ✅ 已实现 |
+| `github_list_commits` | 查看最近提交（分支/作者过滤，上限 30） | ✅ 已实现 |
+
+- 验收：typecheck ✅；30/30 单测（含错误路径）；README 工具表同步；本文档日志更新。
+
 ## 5. 开发日志（每次推进后追加，带时间戳）
+
+### 2026-08-14（阶段 5：高频工具扩展完成）
+- 新增 3 个只读工具（延续安全定位，共 8 个工具）：
+  - `github_list_prs`：PR 列表（state 过滤、draft 标记、head/base 分支、上限 20）。
+  - `github_get_file`：读取文件内容（contents API、支持 ref、base64 解码、404 → `{found:false}`、render 截断 >2000 字符、presentCall 带 locations 跟随）。
+  - `github_list_commits`：提交历史（分支/作者过滤、short SHA、主题行、上限 30）。
+- 客户端新增 `listPrs`/`getFile`/`listCommits`；路径用 `encodeURIComponent`（`%2F` 为 contents API 规范编码）。
+- 测试：client +4（列表映射/过滤参数/编码），tools +4（8 工具注册齐/get_file 404 与 base64/limit 30/presentCall）；共 30/30 通过。
+- 踩坑记录：TS 字符串里 `\n` 是字面反斜杠+n，要用 `\n` 转义才表示换行（client.ts 的 commit 主题切分与测试 mock 各踩一次）；Python 写文件时需注意双重转义。
+- 验证：typecheck ✅、vitest 30/30 ✅、build ✅；README 中英文工具表同步（8 工具）。
+### 2026-08-14（阶段 5：启动）
+- 仓库话题扩充：`dsh-plugin`、`deepseek-harness`、`cordis`、`github`、`agent`（5 个），提升 GitHub 曝光。
+- 规划阶段 5 三个高频只读工具（见上表）：PR 列表、文件读取、提交历史。
+- 状态复核：远程 2 提交已推送、工作区干净、仓库 PUBLIC。
 
 ### 2026-08-13（阶段 0）
 - 阅读官方 `docs/cookbook/adding-a-tool.md`：确认 `defineTool` 最小形状、execute 契约、UI 呈现纯函数规则。

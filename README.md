@@ -36,6 +36,9 @@ npm install dsh-tool-github
 | `github_search_repos` | 按关键词搜索仓库（排序 stars/forks/updated，结果上限 10） | 否 |
 | `github_list_issues` | 列出仓库 issue（state/label 过滤，结果上限 20） | 否 |
 | `github_search_code` | 搜索代码；未配置 token 时返回明确提示 | 是 |
+| `github_list_prs` | 列出仓库 PR（state 过滤，上限 20） | 否 |
+| `github_get_file` | 读取仓库文件内容（支持分支/ref，base64 解码） | 否 |
+| `github_list_commits` | 查看最近提交（分支/作者过滤，上限 30） | 否 |
 | `github_create_pr_draft` | 创建 draft PR（head/base/title/body） | 是 |
 
 ### 行为约定（遵循官方 execute 契约）

@@ -125,3 +125,42 @@ describe('GithubClient', () => {
     expect(new GithubClient({ token: 'x' }).hasToken()).toBe(true)
   })
 })
+
+describe('GithubClient extended tools', () => {
+  it('listPrs maps items and passes state/per_page', async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse(200, [
+      { number: 5, title: 'Fix', state: 'open', draft: true, user: { login: 'bob' }, head: { ref: 'feat/x' }, base: { ref: 'main' }, created_at: '2026-01-02T00:00:00Z', html_url: 'https://github.com/a/b/pull/5' },
+    ]))
+    const client = new GithubClient({ fetchImpl })
+    const prs = await client.listPrs('a', 'b', { state: 'open', perPage: 5 })
+    const [url] = fetchImpl.mock.calls[0] as [string]
+    expect(url).toContain('/repos/a/b/pulls?')
+    expect(url).toContain('state=open')
+    expect(url).toContain('per_page=5')
+    expect(prs[0]).toMatchObject({ number: 5, draft: true, headRef: 'feat/x', baseRef: 'main', author: 'bob' })
+  })
+
+  it('getFile requests the contents endpoint with optional ref', async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse(200, {
+      name: 'index.ts', path: 'src/index.ts', size: 42, content: 'aGVsbG8=', encoding: 'base64', html_url: 'https://x',
+    }))
+    const client = new GithubClient({ fetchImpl })
+    const file = await client.getFile('a', 'b', 'src/index.ts', { ref: 'dev' })
+    const [url] = fetchImpl.mock.calls[0] as [string]
+    expect(url).toContain('/repos/a/b/contents/src%2Findex.ts?ref=dev')
+    expect(file).toMatchObject({ name: 'index.ts', encoding: 'base64', content: 'aGVsbG8=' })
+  })
+
+  it('listCommits maps items and passes sha/author filters', async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse(200, [
+      { sha: 'abcdef1234567890', commit: { message: 'Initial commit\nbody', author: { name: 'Alice', date: '2026-01-01T00:00:00Z' } }, html_url: 'https://github.com/a/b/commit/abcdef' },
+    ]))
+    const client = new GithubClient({ fetchImpl })
+    const commits = await client.listCommits('a', 'b', { branch: 'main', author: 'alice', perPage: 3 })
+    const [url] = fetchImpl.mock.calls[0] as [string]
+    expect(url).toContain('/repos/a/b/commits?')
+    expect(url).toContain('sha=main')
+    expect(url).toContain('author=alice')
+    expect(commits[0]).toMatchObject({ sha: 'abcdef1', message: 'Initial commit', author: 'Alice' })
+  })
+})

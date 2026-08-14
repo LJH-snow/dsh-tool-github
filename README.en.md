@@ -36,6 +36,9 @@ Full example: [examples/cordis.yml](examples/cordis.yml).
 | `github_search_repos` | Search repositories (sort stars/forks/updated, up to 10 results) | no |
 | `github_list_issues` | List issues (state/label filters, up to 20 results) | no |
 | `github_search_code` | Code search; clear hint when no token is configured | yes |
+| `github_list_prs` | List pull requests (state filter, up to 20) | no |
+| `github_get_file` | Read a repository file (branch/ref support, base64-decoded) | no |
+| `github_list_commits` | List recent commits (branch/author filters, up to 30) | no |
 | `github_create_pr_draft` | Create a draft PR (head/base/title/body) | yes |
 
 ### Behavior contract (per the official execute contract)

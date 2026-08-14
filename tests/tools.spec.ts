@@ -14,11 +14,14 @@ function exec(): ToolRunContext {
 const tools = () => Object.fromEntries(createTools(new GithubClient({ fetchImpl: globalThis.fetch })).map(t => [t.name, t]))
 
 describe('tool definitions', () => {
-  it('registers the five planned tools', () => {
+  it('registers the planned tools', () => {
     expect(Object.keys(tools()).sort()).toEqual([
       'github_create_pr_draft',
+      'github_get_file',
       'github_get_repo',
+      'github_list_commits',
       'github_list_issues',
+      'github_list_prs',
       'github_search_code',
       'github_search_repos',
     ])
@@ -109,5 +112,53 @@ describe('tool presentation (pure render intents)', () => {
     expect(t.presentCall(args)).toMatchObject({ card: 'generic', kind: 'edit' })
     expect(t.presentResult(args, { created: true, number: 9, url: 'https://x' })).toMatchObject({ title: 'Draft PR #9' })
     expect(t.presentResult(args, { created: false, reason: 'nope' })).toMatchObject({ title: 'Draft PR failed' })
+  })
+})
+
+describe('extended tools (stage 5)', () => {
+  it('registers all eight tools', () => {
+    const names = Object.keys(Object.fromEntries(createTools(new GithubClient()).map(t => [t.name, t]))).sort()
+    expect(names).toEqual([
+      'github_create_pr_draft',
+      'github_get_file',
+      'github_get_repo',
+      'github_list_commits',
+      'github_list_issues',
+      'github_list_prs',
+      'github_search_code',
+      'github_search_repos',
+    ])
+  })
+
+  it('github_get_file returns found:false on 404 and decodes base64', async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse(404, {}))
+    const client = new GithubClient({ fetchImpl })
+    const tool = createTools(client).find(t => t.name === 'github_get_file')!
+    const missing = await tool.execute({ owner: 'a', repo: 'b', path: 'nope.txt' }, exec())
+    expect(missing).toEqual({ found: false })
+  })
+
+  it('github_get_file decodes base64 content', async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse(200, {
+      name: 'hello.txt', path: 'hello.txt', size: 5, content: Buffer.from('hello').toString('base64'), encoding: 'base64', html_url: 'https://x',
+    }))
+    const client = new GithubClient({ fetchImpl })
+    const tool = createTools(client).find(t => t.name === 'github_get_file')!
+    const result = await tool.execute({ owner: 'a', repo: 'b', path: 'hello.txt' }, exec())
+    expect(result).toMatchObject({ found: true, content: 'hello', size: 5 })
+  })
+
+  it('github_list_commits clamps limit to 30', async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse(200, []))
+    const client = new GithubClient({ fetchImpl })
+    const tool = createTools(client).find(t => t.name === 'github_list_commits')!
+    await tool.execute({ owner: 'a', repo: 'b', limit: 99 }, exec())
+    const [url] = fetchImpl.mock.calls[0] as [string]
+    expect(url).toContain('per_page=30')
+  })
+
+  it('github_list_prs presentCall uses search kind', () => {
+    const t = createTools(new GithubClient()).find(t => t.name === 'github_list_prs') as any
+    expect(t.presentCall({ owner: 'a', repo: 'b' })).toMatchObject({ card: 'generic', kind: 'search' })
   })
 })
