@@ -17,11 +17,13 @@ describe('tool definitions', () => {
   it('registers the planned tools', () => {
     expect(Object.keys(tools()).sort()).toEqual([
       'github_comment_issue',
+      'github_create_branch',
       'github_create_issue',
       'github_create_pr_draft',
       'github_get_file',
       'github_get_issue',
       'github_get_repo',
+      'github_get_user',
       'github_list_branches',
       'github_list_commits',
       'github_list_issue_comments',
@@ -29,10 +31,12 @@ describe('tool definitions', () => {
       'github_list_pr_comments',
       'github_list_prs',
       'github_list_releases',
+      'github_list_workflow_runs',
       'github_merge_pr',
       'github_search_code',
       'github_search_repos',
       'github_update_issue',
+      'github_write_file',
     ])
   })
 
@@ -125,15 +129,17 @@ describe('tool presentation (pure render intents)', () => {
 })
 
 describe('extended tools (stage 5)', () => {
-  it('registers all seventeen tools', () => {
+  it('registers all twenty-one tools', () => {
     const names = Object.keys(Object.fromEntries(createTools(new GithubClient()).map(t => [t.name, t]))).sort()
     expect(names).toEqual([
       'github_comment_issue',
+      'github_create_branch',
       'github_create_issue',
       'github_create_pr_draft',
       'github_get_file',
       'github_get_issue',
       'github_get_repo',
+      'github_get_user',
       'github_list_branches',
       'github_list_commits',
       'github_list_issue_comments',
@@ -141,10 +147,12 @@ describe('extended tools (stage 5)', () => {
       'github_list_pr_comments',
       'github_list_prs',
       'github_list_releases',
+      'github_list_workflow_runs',
       'github_merge_pr',
       'github_search_code',
       'github_search_repos',
       'github_update_issue',
+      'github_write_file',
     ])
   })
 
@@ -247,5 +255,50 @@ describe('stage 7 tools', () => {
     expect(defs['github_merge_pr'].presentCall({ owner: 'a', repo: 'b', prNumber: 5 })).toMatchObject({ title: 'Merge PR #5', kind: 'edit' })
     expect(defs['github_list_releases'].presentCall({ owner: 'a', repo: 'b' })).toMatchObject({ kind: 'search' })
     expect(defs['github_list_branches'].presentCall({ owner: 'a', repo: 'b' })).toMatchObject({ kind: 'search' })
+  })
+})
+
+describe('stage 9 tools', () => {
+  it('write tools require a token', async () => {
+    const defs = Object.fromEntries(createTools(new GithubClient({ fetchImpl: vi.fn() })).map(t => [t.name, t]))
+    const branch = await defs['github_create_branch'].execute({ owner: 'a', repo: 'b', branch: 'feat/x' }, exec())
+    expect(branch).toMatchObject({ ok: false })
+    expect(branch.reason).toContain('token')
+    const write = await defs['github_write_file'].execute({ owner: 'a', repo: 'b', path: 'x.md', content: 'y', message: 'm' }, exec())
+    expect(write).toMatchObject({ ok: false })
+    expect(write.reason).toContain('token')
+  })
+
+  it('read tools work without a token', async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse(200, {
+      login: 'u', name: null, bio: null, followers: 0, following: 0, public_repos: 0, location: null, blog: null, html_url: 'https://x',
+    }))
+    const client = new GithubClient({ fetchImpl })
+    const defs = Object.fromEntries(createTools(client).map(t => [t.name, t]))
+    const user = await defs['github_get_user'].execute({ username: 'u' }, exec())
+    expect(user).toMatchObject({ found: true, login: 'u' })
+  })
+
+  it('github_get_user returns found:false on 404', async () => {
+    const client = new GithubClient({ fetchImpl: vi.fn(async () => jsonResponse(404, {})) })
+    const tool = createTools(client).find(t => t.name === 'github_get_user')!
+    const result = await tool.execute({ username: 'nobody' }, exec())
+    expect(result).toEqual({ found: false })
+  })
+
+  it('github_write_file passes through to the client with a token', async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse(201, { commit: { sha: 'abc123' } }))
+    const client = new GithubClient({ token: 'ghp_test', fetchImpl })
+    const tool = createTools(client).find(t => t.name === 'github_write_file')!
+    const result = await tool.execute({ owner: 'a', repo: 'b', path: 'x.md', content: 'y', message: 'm' }, exec())
+    expect(result).toEqual({ ok: true, path: 'x.md', commitSha: 'abc123' })
+  })
+
+  it('presentCall for stage 9 tools', () => {
+    const defs = Object.fromEntries(createTools(new GithubClient()).map(t => [t.name, t])) as any
+    expect(defs['github_get_user'].presentCall({ username: 'u' })).toMatchObject({ kind: 'read' })
+    expect(defs['github_list_workflow_runs'].presentCall({ owner: 'a', repo: 'b' })).toMatchObject({ kind: 'search' })
+    expect(defs['github_create_branch'].presentCall({ owner: 'a', repo: 'b', branch: 'feat/x' })).toMatchObject({ kind: 'edit' })
+    expect(defs['github_write_file'].presentCall({ owner: 'a', repo: 'b', path: 'x.md', content: '', message: '' })).toMatchObject({ kind: 'edit' })
   })
 })

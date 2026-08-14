@@ -298,3 +298,73 @@ describe('GithubClient stage 8', () => {
     expect(comments[0]).toMatchObject({ id: 2, author: 'carol' })
   })
 })
+
+describe('GithubClient stage 9', () => {
+  it('getUser maps the user profile', async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse(200, {
+      login: 'octocat', name: 'Octo Cat', bio: 'hello', followers: 100, following: 2,
+      public_repos: 10, location: 'SF', blog: 'https://blog.example', html_url: 'https://github.com/octocat',
+    }))
+    const client = new GithubClient({ fetchImpl })
+    const user = await client.getUser('octocat')
+    expect(user).toEqual({
+      login: 'octocat', name: 'Octo Cat', bio: 'hello', followers: 100, following: 2,
+      publicRepos: 10, location: 'SF', blog: 'https://blog.example', url: 'https://github.com/octocat',
+    })
+  })
+
+  it('listWorkflowRuns hits actions/runs with filters', async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse(200, {
+      workflow_runs: [{ id: 1, name: 'CI', head_branch: 'main', status: 'completed', conclusion: 'success', created_at: '2026-01-01T00:00:00Z', html_url: 'https://x/1' }],
+    }))
+    const client = new GithubClient({ fetchImpl })
+    const runs = await client.listWorkflowRuns('a', 'b', { branch: 'main', status: 'success', perPage: 5 })
+    const [url] = fetchImpl.mock.calls[0] as [string]
+    expect(url).toContain('/repos/a/b/actions/runs?')
+    expect(url).toContain('branch=main')
+    expect(url).toContain('status=success')
+    expect(runs[0]).toMatchObject({ workflowName: 'CI', headBranch: 'main', conclusion: 'success' })
+  })
+
+  it('createBranch resolves the base ref and POSTs a new ref', async () => {
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(jsonResponse(200, { object: { sha: 'abc123' } }))
+      .mockResolvedValueOnce(jsonResponse(201, {}))
+    const client = new GithubClient({ token: 'ghp_test', fetchImpl })
+    const result = await client.createBranch('a', 'b', 'feat/x', 'heads/main')
+    const [baseUrl, postUrl, postInit] = [fetchImpl.mock.calls[0][0] as string, fetchImpl.mock.calls[1][0] as string, fetchImpl.mock.calls[1][1] as RequestInit]
+    expect(baseUrl).toContain('/git/ref/heads/main')
+    expect(postUrl).toContain('/git/refs')
+    expect(postInit.method).toBe('POST')
+    expect(JSON.parse(String(postInit.body))).toEqual({ ref: 'refs/heads/feat/x', sha: 'abc123' })
+    expect(result).toEqual({ ok: true, name: 'feat/x' })
+  })
+
+  it('createBranch maps 422 to a business failure', async () => {
+    const client = new GithubClient({ token: 'ghp_test', fetchImpl: vi.fn(async () => jsonResponse(422, {})) })
+    const result = await client.createBranch('a', 'b', 'feat/x', 'heads/main')
+    expect(result.ok).toBe(false)
+    expect(result.reason).toBeTruthy()
+  })
+
+  it('writeFile PUTs base64 content and returns the commit SHA', async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse(201, { commit: { sha: 'abcdef123456' } }))
+    const client = new GithubClient({ token: 'ghp_test', fetchImpl })
+    const result = await client.writeFile('a', 'b', 'docs/notes.md', 'hello', { message: 'add notes', branch: 'main' })
+    const [url, init] = fetchImpl.mock.calls[0] as [string, RequestInit]
+    expect(url).toContain('/repos/a/b/contents/docs%2Fnotes.md')
+    expect(init.method).toBe('PUT')
+    const body = JSON.parse(String(init.body))
+    expect(body).toMatchObject({ message: 'add notes', branch: 'main' })
+    expect(body.content).toBe(Buffer.from('hello').toString('base64'))
+    expect(result).toEqual({ ok: true, path: 'docs/notes.md', commitSha: 'abcdef1' })
+  })
+
+  it('writeFile maps 422/409 to a business failure', async () => {
+    for (const status of [422, 409]) {
+      const client = new GithubClient({ token: 'ghp_test', fetchImpl: vi.fn(async () => jsonResponse(status, {})) })
+      const result = await client.writeFile('a', 'b', 'x.md', 'y', { message: 'm' })
+      expect(result.ok).toBe(false)
+    }
+  })
+})

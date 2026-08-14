@@ -170,6 +170,25 @@ v0.4 方向：补齐「查看 issue 详情、issue 评论、PR 评论」三个�
 
 - 验收：typecheck ✅；50/50 单测（含 404 业务值、limit 钳制、presentCall）；README 工具表同步；本文档日志更新。
 
+### 阶段 9：用户 / CI / 分支 / 写文件（2026-08-14 新增）
+
+v0.5 方向：补齐「查人、查 CI、建分支、改文件」——写文件让 Agent 能真正修改仓库代码，配合分支+PR 形成「改代码→提 PR」完整链路。
+
+| 工具 | 功能 | 需 token | 状态 |
+|---|---|---|---|
+| `github_get_user` | 查询用户/组织信息（名称、bio、粉丝、仓库数） | 否 | ✅ 已实现 |
+| `github_list_workflow_runs` | 查看 Actions 最近运行（workflow、状态、结论） | 否* | ✅ 已实现 |
+| `github_create_branch` | 创建分支（从指定 ref） | 是 | ✅ 已实现 |
+| `github_write_file` | 创建/更新仓库文件（自动提交，可指定分支） | 是 | ✅ 已实现 |
+
+> *workflow runs 对公开仓库无需 token，私有仓库需要。
+
+安全设计：
+- `github_create_branch`/`github_write_file` 为写操作：需 token，无 token → 业务失败值；422/409 → 业务失败值。
+- `github_write_file` 描述中显式标注副作用（会创建 commit）。
+
+- 验收：typecheck ✅；61/61 单测（含无 token、422/409/404 错误路径、ref 编码）；README 工具表同步；本文档日志更新。
+
 ## 5. 开发日志（每次推进后追加，带时间戳）
 
 ### 2026-08-14（阶段 5：高频工具扩展完成）
@@ -207,6 +226,19 @@ v0.4 方向：补齐「查看 issue 详情、issue 评论、PR 评论」三个�
 - 测试：client +3（详情映射/两评论端点），tools +4（404 业务值、免 token 成功、limit 30、presentCall×3）；共 50/50 通过。
 - 验证：typecheck ✅、vitest 50/50 ✅、build ✅；README 中英文同步（17 工具）。
 - 发布状态：npm 发布暂缓——账号 libai168 开启 2FA，npm 新政策（2026-08）禁止创建 bypass-2FA token，且 scope 下无包导致 All packages token 创建失败；正路是网页创建「单包 @libai168/dsh-tool-github + 2FA bypass」的 granular token 或 trusted publishing。
+### 2026-08-14（阶段 9：用户/CI/分支/写文件完成，共 21 个工具）
+- 新增 4 个工具：
+  - `github_get_user`（只读）：用户/组织信息（name/bio/followers/publicRepos/location/blog）；404 → `{found:false}`。
+  - `github_list_workflow_runs`（只读）：Actions 运行列表（workflow/分支/status/conclusion，branch/status 过滤，上限 20）。
+  - `github_create_branch`（写）：先取 base ref 的 SHA 再 POST git refs（`refs/heads/{branch}`）；422 → 业务失败值；ref 用按段编码保留斜杠（`heads/main`）。
+  - `github_write_file`（写）：PUT contents API，base64 编码内容，自动创建 commit；422/409 → 业务失败值；描述标注副作用。
+- 测试：client +6（user 映射/CI 过滤/建分支两段流程/422/写文件 base64+commit/422+409），tools +5（无 token×2、只读成功、404、写文件透传、presentCall×4）；共 61/61 通过。
+- 踩坑：git ref 端点的 ref 参数不能整体 encodeURIComponent（会把 `/` 变 `%2F`），需按 `/` 分段编码。
+- 验证：typecheck ✅、vitest 61/61 ✅、build ✅；README 中英文同步（21 工具 + workflow 私有仓库需 token 注记）。
+### 2026-08-14（阶段 9：启动）
+- 项目获 2 颗 star，继续完善。
+- 规划四个工具：用户信息（只读）、CI 状态（只读）、创建分支（写）、写文件（写）。
+
 ### 2026-08-14（README 更新：GitHub 安装方式）
 - 决策：npm 发布暂缓期间，README 安装章节改为「从 GitHub 直接安装」为主（`npm install github:LJH-snow/dsh-tool-github` / 本地 clone + build），npm 安装方式保留为注释说明。
 - `examples/cordis.yml` 同步：加载方式改为 `github:LJH-snow/dsh-tool-github`（注释保留 npm 方式）。

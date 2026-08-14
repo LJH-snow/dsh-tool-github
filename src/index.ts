@@ -899,6 +899,210 @@ export function createTools(client: GithubClient) {
     }),
 
     defineTool({
+      name: 'github_get_user',
+      description: 'Get information about a GitHub user or organization: name, bio, followers, public repositories, and location.',
+      parameters: {
+        username: { type: 'string', required: true, description: 'GitHub username or organization name' },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            found: { type: 'boolean', description: 'Whether the user exists' },
+            login: { type: 'string', description: 'Username' },
+            name: { oneOf: [{ type: 'string' }, { type: 'null' }], description: 'Display name' },
+            bio: { oneOf: [{ type: 'string' }, { type: 'null' }], description: 'Bio' },
+            followers: { type: 'integer', description: 'Follower count' },
+            following: { type: 'integer', description: 'Following count' },
+            publicRepos: { type: 'integer', description: 'Public repository count' },
+            location: { oneOf: [{ type: 'string' }, { type: 'null' }], description: 'Location' },
+            blog: { oneOf: [{ type: 'string' }, { type: 'null' }], description: 'Website URL' },
+            url: { type: 'string', description: 'Profile URL' },
+          },
+        },
+        render: (_args, value) => {
+          if (!value.found) return [{ type: 'text', text: 'User not found.' }]
+          const lines = [
+            `${value.name ?? value.login} (@${value.login})`,
+            value.bio ?? '',
+            `followers: ${value.followers ?? 0} · following: ${value.following ?? 0} · public repos: ${value.publicRepos ?? 0}`,
+            value.location ? `location: ${value.location}` : '',
+            value.blog ? `blog: ${value.blog}` : '',
+            value.url ?? '',
+          ].filter(Boolean)
+          return [{ type: 'text', text: lines.join('\n') }]
+        },
+      },
+      presentCall(args): ToolCallView {
+        return { card: 'generic', title: `User: ${args.username}`, kind: 'read' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { found?: boolean; login?: string; name?: string | null }
+        if (!v.found) return { card: 'generic', title: 'User not found' }
+        return { card: 'generic', title: `${v.name ?? v.login} (@${v.login})` }
+      },
+      async execute(args, exec) {
+        try {
+          const user = await client.getUser(args.username, exec.signal)
+          return { found: true, ...user }
+        } catch (error) {
+          if (error instanceof GithubError && error.status === 404) {
+            return { found: false }
+          }
+          throw error
+        }
+      },
+    }),
+
+    defineTool({
+      name: 'github_list_workflow_runs',
+      description: 'List recent GitHub Actions workflow runs: workflow name, branch, status, and conclusion. Public repositories need no token.',
+      parameters: {
+        owner: { type: 'string', required: true, description: 'Repository owner' },
+        repo: { type: 'string', required: true, description: 'Repository name' },
+        branch: { type: 'string', description: 'Filter by branch' },
+        status: { type: 'string', enum: ['completed', 'in_progress', 'queued', 'success', 'failure', 'cancelled'], description: 'Filter by run status' },
+        limit: { type: 'integer', description: 'Maximum results, 1-20 (default 10)' },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            items: {
+              type: 'array',
+              items: {
+                type: 'object',
+                additionalProperties: false,
+                properties: {
+                  id: { type: 'integer', description: 'Run id' },
+                  workflowName: { type: 'string', description: 'Workflow name' },
+                  headBranch: { type: 'string', description: 'Branch' },
+                  status: { type: 'string', description: 'Run status' },
+                  conclusion: { oneOf: [{ type: 'string' }, { type: 'null' }], description: 'Run conclusion when completed' },
+                  createdAt: { type: 'string', description: 'ISO creation timestamp' },
+                  url: { type: 'string', description: 'Run URL' },
+                },
+              },
+            },
+          },
+        },
+        render: (_args, value) => {
+          const items = value.items ?? []
+          if (items.length === 0) return [{ type: 'text', text: 'No workflow runs found.' }]
+          const lines = items.map(item => {
+            const conclusion = item.conclusion ? ` → ${item.conclusion}` : ''
+            return `${item.workflowName} @ ${item.headBranch} (${item.status}${conclusion}, ${item.createdAt})`
+          })
+          return [{ type: 'text', text: lines.join('\n') }]
+        },
+      },
+      presentCall(args): ToolCallView {
+        return { card: 'generic', title: `CI runs: ${args.owner}/${args.repo}`, kind: 'search' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { items?: Array<{ workflowName: string; status: string; conclusion?: string | null }> }
+        const items = v.items ?? []
+        if (items.length === 0) return { card: 'generic', title: 'No workflow runs' }
+        return {
+          card: 'generic',
+          title: `${items.length} run(s)`,
+          content: [{ type: 'text', text: items.map(i => `${i.workflowName}: ${i.conclusion ?? i.status}`).join('\n') }],
+        }
+      },
+      async execute(args, exec) {
+        const limit = args.limit === undefined ? 10 : Math.max(1, Math.min(args.limit, 20))
+        const items = await client.listWorkflowRuns(args.owner, args.repo, { branch: args.branch, status: args.status, perPage: limit, signal: exec.signal })
+        return { items }
+      },
+    }),
+
+    defineTool({
+      name: 'github_create_branch',
+      description: 'Create a branch in a GitHub repository from an existing ref (default branch or any other ref). WRITE operation: requires a token.',
+      parameters: {
+        owner: { type: 'string', required: true, description: 'Repository owner' },
+        repo: { type: 'string', required: true, description: 'Repository name' },
+        branch: { type: 'string', required: true, description: 'New branch name, e.g. feature/my-change' },
+        fromRef: { type: 'string', description: 'Source ref to branch from, e.g. main or heads/main (default: the default branch, use "heads/main" format for other branches)' },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            ok: { type: 'boolean', description: 'Whether the branch was created' },
+            name: { type: 'string', description: 'Branch name' },
+            reason: { type: 'string', description: 'Explanation when not created' },
+          },
+        },
+        render: (_args, value) => {
+          if (value.ok) return [{ type: 'text', text: `Created branch ${value.name}` }]
+          return [{ type: 'text', text: `Could not create branch: ${value.reason}` }]
+        },
+      },
+      presentCall(args): ToolCallView {
+        return { card: 'generic', title: `Create branch ${args.branch}`, kind: 'edit' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { ok?: boolean; name?: string; reason?: string }
+        if (v.ok) return { card: 'generic', title: `Branch ${v.name} created` }
+        return { card: 'generic', title: 'Create branch failed', content: [{ type: 'text', text: v.reason ?? 'Unknown' }] }
+      },
+      async execute(args, exec) {
+        if (!client.hasToken()) {
+          return { ok: false, reason: 'Creating a branch requires a GitHub token. Configure the plugin with a token.' }
+        }
+        const fromRef = args.fromRef ?? 'heads/main'
+        return client.createBranch(args.owner, args.repo, args.branch, fromRef, exec.signal)
+      },
+    }),
+
+    defineTool({
+      name: 'github_write_file',
+      description: 'Create or update a file in a GitHub repository. WRITE operation: requires a token and creates a commit on the remote repository.',
+      parameters: {
+        owner: { type: 'string', required: true, description: 'Repository owner' },
+        repo: { type: 'string', required: true, description: 'Repository name' },
+        path: { type: 'string', required: true, description: 'File path in the repository, e.g. docs/notes.md' },
+        content: { type: 'string', required: true, description: 'File content (UTF-8 text)' },
+        message: { type: 'string', required: true, description: 'Commit message' },
+        branch: { type: 'string', description: 'Branch to write to (defaults to the default branch)' },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            ok: { type: 'boolean', description: 'Whether the file was written' },
+            path: { type: 'string', description: 'File path' },
+            commitSha: { type: 'string', description: 'Commit short SHA' },
+            reason: { type: 'string', description: 'Explanation when not written' },
+          },
+        },
+        render: (_args, value) => {
+          if (value.ok) return [{ type: 'text', text: `Wrote ${value.path} (commit ${value.commitSha})` }]
+          return [{ type: 'text', text: `Could not write ${value.path}: ${value.reason}` }]
+        },
+      },
+      presentCall(args): ToolCallView {
+        return { card: 'generic', title: `Write ${args.path}`, kind: 'edit' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { ok?: boolean; path?: string; commitSha?: string; reason?: string }
+        if (v.ok) return { card: 'generic', title: `Wrote ${v.path}`, content: [{ type: 'text', text: `commit ${v.commitSha}` }] }
+        return { card: 'generic', title: 'Write file failed', content: [{ type: 'text', text: v.reason ?? 'Unknown' }] }
+      },
+      async execute(args, exec) {
+        if (!client.hasToken()) {
+          return { ok: false, reason: 'Writing a file requires a GitHub token. Configure the plugin with a token.' }
+        }
+        return client.writeFile(args.owner, args.repo, args.path, args.content, { message: args.message, branch: args.branch, signal: exec.signal })
+      },
+    }),
+
+    defineTool({
       name: 'github_create_pr_draft',
       description: 'Create a draft pull request on GitHub. Returns the PR number and URL when created.',
       parameters: {

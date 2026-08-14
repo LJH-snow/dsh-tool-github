@@ -120,6 +120,41 @@ export interface CommentItem {
   url: string
 }
 
+export interface UserInfo {
+  login: string
+  name: string | null
+  bio: string | null
+  followers: number
+  following: number
+  publicRepos: number
+  location: string | null
+  blog: string | null
+  url: string
+}
+
+export interface WorkflowRunItem {
+  id: number
+  workflowName: string
+  headBranch: string
+  status: string
+  conclusion: string | null
+  createdAt: string
+  url: string
+}
+
+export interface BranchCreateResult {
+  ok: boolean
+  name?: string
+  reason?: string
+}
+
+export interface FileWriteResult {
+  ok: boolean
+  path?: string
+  commitSha?: string
+  reason?: string
+}
+
 export type IssueState = 'open' | 'closed' | 'all'
 
 export class GithubError extends Error {
@@ -518,5 +553,98 @@ export class GithubClient {
       body: item.body,
       url: item.html_url,
     }))
+  }
+
+  async getUser(username: string, signal?: AbortSignal): Promise<UserInfo> {
+    const data = await this.request<{
+      login: string
+      name: string | null
+      bio: string | null
+      followers: number
+      following: number
+      public_repos: number
+      location: string | null
+      blog: string | null
+      html_url: string
+    }>(`/users/${encodeURIComponent(username)}`, { signal })
+    return {
+      login: data.login,
+      name: data.name,
+      bio: data.bio,
+      followers: data.followers,
+      following: data.following,
+      publicRepos: data.public_repos,
+      location: data.location,
+      blog: data.blog,
+      url: data.html_url,
+    }
+  }
+
+  async listWorkflowRuns(owner: string, repo: string, options: { branch?: string; status?: string; perPage?: number; signal?: AbortSignal } = {}): Promise<WorkflowRunItem[]> {
+    const params = new URLSearchParams({
+      per_page: String(Math.max(1, Math.min(options.perPage ?? 10, 100))),
+    })
+    if (options.branch) params.set('branch', options.branch)
+    if (options.status) params.set('status', options.status)
+    const data = await this.request<{ workflow_runs: Array<{
+      id: number
+      name: string
+      head_branch: string
+      status: string
+      conclusion: string | null
+      created_at: string
+      html_url: string
+    }> }>(`/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/actions/runs?${params}`, { signal: options.signal })
+    return data.workflow_runs.map(item => ({
+      id: item.id,
+      workflowName: item.name,
+      headBranch: item.head_branch,
+      status: item.status,
+      conclusion: item.conclusion,
+      createdAt: item.created_at,
+      url: item.html_url,
+    }))
+  }
+
+  async createBranch(owner: string, repo: string, branch: string, fromRef: string, signal?: AbortSignal): Promise<BranchCreateResult> {
+    try {
+      const base = await this.request<{ object: { sha: string } }>(
+        `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/git/ref/${fromRef.split('/').map(encodeURIComponent).join('/')}`,
+        { signal },
+      )
+      await this.request<unknown>(
+        `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/git/refs`,
+        { method: 'POST', body: { ref: `refs/heads/${branch}`, sha: base.object.sha }, signal },
+      )
+      return { ok: true, name: branch }
+    } catch (error) {
+      if (error instanceof GithubError && error.status === 422) {
+        return { ok: false, name: branch, reason: 'Branch already exists or the ref is invalid.' }
+      }
+      throw error
+    }
+  }
+
+  async writeFile(owner: string, repo: string, path: string, content: string, options: { message: string; branch?: string; signal?: AbortSignal }): Promise<FileWriteResult> {
+    try {
+      const data = await this.request<{ commit: { sha: string } }>(
+        `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/contents/${encodeURIComponent(path)}`,
+        {
+          method: 'PUT',
+          body: {
+            message: options.message,
+            content: Buffer.from(content, 'utf8').toString('base64'),
+            branch: options.branch,
+          },
+          signal: options.signal,
+        },
+      )
+      return { ok: true, path, commitSha: data.commit.sha.slice(0, 7) }
+    } catch (error) {
+      if (error instanceof GithubError && (error.status === 422 || error.status === 409)) {
+        return { ok: false, path, reason: 'Could not write the file (validation failed or the branch has conflicts).' }
+      }
+      throw error
+    }
   }
 }

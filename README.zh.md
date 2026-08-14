@@ -43,6 +43,8 @@ npm install /path/to/dsh-tool-github
 
 完整示例见 [examples/cordis.yml](examples/cordis.yml)。
 
+> *workflow runs 对公开仓库无需 token，私有仓库需要。
+>
 > 安全建议：查询类工具无需 token；代码搜索（`github_search_code`）与创建 PR（`github_create_pr_draft`）需要 token。建议使用最小权限的 fine-grained token，避免把 token 写入版本库。
 
 ## 提供的工具
@@ -65,6 +67,10 @@ npm install /path/to/dsh-tool-github
 | `github_get_issue` | 查看 issue 详情（标题、状态、作者、标签、body） | 否 |
 | `github_list_issue_comments` | 列出 issue 评论（作者、时间、内容） | 否 |
 | `github_list_pr_comments` | 列出 PR review 评论（作者、时间、内容） | 否 |
+| `github_get_user` | 查询用户/组织信息（名称、bio、粉丝、仓库数） | 否 |
+| `github_list_workflow_runs` | 查看 Actions 运行（workflow、分支、状态） | 否* |
+| `github_create_branch` | 创建分支（从指定 ref） | 是 |
+| `github_write_file` | 创建/更新文件（自动提交） | 是 |
 | `github_create_pr_draft` | 创建 draft PR（head/base/title/body） | 是 |
 
 ### 行为约定（遵循官方 execute 契约）
