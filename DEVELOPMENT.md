@@ -207,6 +207,11 @@ v0.4 方向：补齐「查看 issue 详情、issue 评论、PR 评论」三个�
 - 测试：client +3（详情映射/两评论端点），tools +4（404 业务值、免 token 成功、limit 30、presentCall×3）；共 50/50 通过。
 - 验证：typecheck ✅、vitest 50/50 ✅、build ✅；README 中英文同步（17 工具）。
 - 发布状态：npm 发布暂缓——账号 libai168 开启 2FA，npm 新政策（2026-08）禁止创建 bypass-2FA token，且 scope 下无包导致 All packages token 创建失败；正路是网页创建「单包 @libai168/dsh-tool-github + 2FA bypass」的 granular token 或 trusted publishing。
+### 2026-08-14（README 更新：GitHub 安装方式）
+- 决策：npm 发布暂缓期间，README 安装章节改为「从 GitHub 直接安装」为主（`npm install github:LJH-snow/dsh-tool-github` / 本地 clone + build），npm 安装方式保留为注释说明。
+- `examples/cordis.yml` 同步：加载方式改为 `github:LJH-snow/dsh-tool-github`（注释保留 npm 方式）。
+- 说明：不发布 npm 不影响使用（GitHub 安装、本地路径、源码自建均可），仅缺少 npm 一键安装与生态入口。
+
 ### 2026-08-14（阶段 8：启动）
 - 规划三个只读内容工具（见上表）。全部无需 token。
 - 同步 README 发布说明：npm 发布需「2FA bypass 的 granular token 或 trusted publishing」（记录本次发布受阻原因：账号开启 2FA + npm 新政策限制 bypass-2FA token 创建 + scope 下无包导致 All packages token 创建失败）。

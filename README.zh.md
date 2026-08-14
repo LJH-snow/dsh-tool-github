@@ -8,9 +8,24 @@
 
 ## 安装
 
+直接从 GitHub 安装（无需发布 npm）：
+
 ```sh
-npm install @libai168/dsh-tool-github
+npm install github:LJH-snow/dsh-tool-github
+# 或指定分支/标签
+npm install github:LJH-snow/dsh-tool-github#main
 ```
+
+或从本地目录安装：
+
+```sh
+git clone https://github.com/LJH-snow/dsh-tool-github
+cd dsh-tool-github
+npm install && npm run build   # 构建到 lib/
+npm install /path/to/dsh-tool-github
+```
+
+> 发布到 npm 后，也可用 `npm install @libai168/dsh-tool-github` 安装。
 
 需要 `@deepseek-ai/cordis`（^4.0.1）与 `@deepseek-ai/dsh-tools`（^0.1.0-rc.6）作为 peer 依赖，由宿主 dsh 运行时提供。
 

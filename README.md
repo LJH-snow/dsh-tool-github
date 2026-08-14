@@ -8,9 +8,24 @@ Built on the official "everything is a plugin" architecture via `ctx.tools.regis
 
 ## Install
 
+Install directly from GitHub (no npm publish needed):
+
 ```sh
-npm install @libai168/dsh-tool-github
+npm install github:LJH-snow/dsh-tool-github
+# or a specific branch/tag
+npm install github:LJH-snow/dsh-tool-github#main
 ```
+
+Or from a local checkout:
+
+```sh
+git clone https://github.com/LJH-snow/dsh-tool-github
+cd dsh-tool-github
+npm install && npm run build   # builds to lib/
+npm install /path/to/dsh-tool-github
+```
+
+> Once published to npm, it will also be installable as `npm install @libai168/dsh-tool-github`.
 
 Requires `@deepseek-ai/cordis` (^4.0.1) and `@deepseek-ai/dsh-tools` (^0.1.0-rc.6) as peer dependencies, provided by the host dsh runtime.
 
