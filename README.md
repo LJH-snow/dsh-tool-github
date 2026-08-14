@@ -44,6 +44,9 @@ Full example: [examples/cordis.yml](examples/cordis.yml).
 | `github_create_issue` | Create an issue (title required; body/labels optional) | yes |
 | `github_comment_issue` | Comment on an issue or PR | yes |
 | `github_update_issue` | Open or close an issue | yes |
+| `github_merge_pr` | Merge a PR (merge/squash/rebase; requires token) | yes |
+| `github_list_releases` | List releases (tag, draft/prerelease, author) | no |
+| `github_list_branches` | List branches with latest SHAs | no |
 | `github_create_pr_draft` | Create a draft PR (head/base/title/body) | yes |
 
 ### Behavior contract (per the official execute contract)

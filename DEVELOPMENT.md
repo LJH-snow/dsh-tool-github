@@ -138,6 +138,26 @@ v0.3 方向：让 Agent 能回写 GitHub——创建 issue、评论、开关 iss
 
 - 验收：typecheck ✅；38/38 单测（成功 + 422/404 + 未配置 token）；README 工具表同步；本文档日志更新。
 
+### 阶段 7：收官工具（2026-08-14 新增）
+
+v1.0 方向：补齐 GitHub 开发助手剩余高频场景，形成完整工具面后发布 npm。
+
+| 工具 | 功能 | 状态 |
+|---|---|---|
+| `github_merge_pr` | 合并已通过的 PR（写操作，需 token；merge/squash/rebase） | ✅ 已实现 |
+| `github_list_releases` | 列出仓库发布（含 tag、作者、时间） | ✅ 已实现 |
+| `github_list_branches` | 列出仓库分支（含最新 SHA） | ✅ 已实现 |
+
+安全设计：
+- `github_merge_pr` 是写操作：需 token，405（不可合并）→ 业务失败值；描述标注副作用。
+- `github_list_releases`/`github_list_branches` 只读，无需 token。
+
+收官清单：
+- [x] 14 个工具全部实现且单测通过
+- [x] README 中英文工具表完整（14 工具）
+- [x] `npm pack` 产物确认（见阶段 4 记录；本阶段再验证）
+- [ ] npm 发布（需用户登录 npm）— 未完成，待用户 `npm adduser`
+
 ## 5. 开发日志（每次推进后追加，带时间戳）
 
 ### 2026-08-14（阶段 5：高频工具扩展完成）
@@ -158,6 +178,18 @@ v0.3 方向：让 Agent 能回写 GitHub——创建 issue、评论、开关 iss
 - 安全设计：工具描述显式标注「WRITE operation、需要 token、影响远程仓库」；presentCall 用 `kind:'edit'`，update 的标题随目标状态变化（Close/Open issue #n）。
 - 测试：client +4（POST body 断言/422/评论端点/PATCH+404），tools +4（无 token 业务值×3、有 token 成功、presentCall×2）；共 38/38 通过。
 - 验证：typecheck ✅、vitest 38/38 ✅、build ✅；README 中英文工具表同步（11 工具）。
+### 2026-08-14（阶段 7：收官工具完成，共 14 个工具）
+- 新增 3 个工具：
+  - `github_merge_pr`（写操作）：PUT /pulls/{n}/merge，merge_method 可选；405/409（不可合并）与 404 → 业务失败值；无 token → 业务值。
+  - `github_list_releases`（只读）：tag/draft/prerelease/作者/时间，上限 20。
+  - `github_list_branches`（只读）：分支 + 最新 short SHA，上限 50。
+- 测试：client +5（PUT body/405/409/404 映射、releases、branches），tools +4（merge 无 token、merge 成功、只读免 token×2、presentCall×3）；共 47/47 通过。
+- 验证：typecheck ✅、vitest 47/47 ✅、build ✅；README 中英文同步（14 工具）。
+- 代码功能全部完成；剩余 npm 发布待用户登录 npm（`npm adduser`）。
+### 2026-08-14（阶段 7：启动）
+- 规划收官三工具：PR 合并（写）、发布列表、分支列表。
+- 目标：14 个工具完整覆盖 GitHub 开发助手高频场景 → 发布 npm v1.0。
+
 ### 2026-08-14（阶段 6：启动）
 - 规划写操作工具三件套（见上表），延续「业务失败用规范值、基础设施错误抛错」契约。
 - 安全基线：写操作必须有 token；无 token 返回明确业务值；描述中标注副作用。

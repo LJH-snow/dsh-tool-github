@@ -21,9 +21,12 @@ describe('tool definitions', () => {
       'github_create_pr_draft',
       'github_get_file',
       'github_get_repo',
+      'github_list_branches',
       'github_list_commits',
       'github_list_issues',
       'github_list_prs',
+      'github_list_releases',
+      'github_merge_pr',
       'github_search_code',
       'github_search_repos',
       'github_update_issue',
@@ -119,7 +122,7 @@ describe('tool presentation (pure render intents)', () => {
 })
 
 describe('extended tools (stage 5)', () => {
-  it('registers all eleven tools', () => {
+  it('registers all fourteen tools', () => {
     const names = Object.keys(Object.fromEntries(createTools(new GithubClient()).map(t => [t.name, t]))).sort()
     expect(names).toEqual([
       'github_comment_issue',
@@ -127,9 +130,12 @@ describe('extended tools (stage 5)', () => {
       'github_create_pr_draft',
       'github_get_file',
       'github_get_repo',
+      'github_list_branches',
       'github_list_commits',
       'github_list_issues',
       'github_list_prs',
+      'github_list_releases',
+      'github_merge_pr',
       'github_search_code',
       'github_search_repos',
       'github_update_issue',
@@ -201,5 +207,39 @@ describe('write tools (stage 6)', () => {
     const t = createTools(new GithubClient()).find(t => t.name === 'github_update_issue') as any
     expect(t.presentCall({ owner: 'a', repo: 'b', issueNumber: 5, state: 'closed' })).toMatchObject({ title: 'Close issue #5' })
     expect(t.presentCall({ owner: 'a', repo: 'b', issueNumber: 5, state: 'open' })).toMatchObject({ title: 'Open issue #5' })
+  })
+})
+
+describe('stage 7 tools', () => {
+  it('github_merge_pr requires a token', async () => {
+    const defs = Object.fromEntries(createTools(new GithubClient({ fetchImpl: vi.fn() })).map(t => [t.name, t]))
+    const result = await defs['github_merge_pr'].execute({ owner: 'a', repo: 'b', prNumber: 5 }, exec())
+    expect(result).toMatchObject({ ok: false, number: 5 })
+    expect(result.reason).toContain('token')
+  })
+
+  it('github_merge_pr merges with a token', async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse(200, { merged: true, html_url: 'https://github.com/a/b/pull/5' }))
+    const client = new GithubClient({ token: 'ghp_test', fetchImpl })
+    const defs = Object.fromEntries(createTools(client).map(t => [t.name, t]))
+    const result = await defs['github_merge_pr'].execute({ owner: 'a', repo: 'b', prNumber: 5, mergeMethod: 'squash' }, exec())
+    expect(result).toEqual({ ok: true, number: 5, url: 'https://github.com/a/b/pull/5' })
+  })
+
+  it('read-only stage 7 tools work without a token', async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse(200, []))
+    const client = new GithubClient({ fetchImpl })
+    const defs = Object.fromEntries(createTools(client).map(t => [t.name, t]))
+    const releases = await defs['github_list_releases'].execute({ owner: 'a', repo: 'b' }, exec())
+    expect(releases).toEqual({ items: [] })
+    const branches = await defs['github_list_branches'].execute({ owner: 'a', repo: 'b' }, exec())
+    expect(branches).toEqual({ items: [] })
+  })
+
+  it('presentCall titles for stage 7 tools', () => {
+    const defs = Object.fromEntries(createTools(new GithubClient()).map(t => [t.name, t])) as any
+    expect(defs['github_merge_pr'].presentCall({ owner: 'a', repo: 'b', prNumber: 5 })).toMatchObject({ title: 'Merge PR #5', kind: 'edit' })
+    expect(defs['github_list_releases'].presentCall({ owner: 'a', repo: 'b' })).toMatchObject({ kind: 'search' })
+    expect(defs['github_list_branches'].presentCall({ owner: 'a', repo: 'b' })).toMatchObject({ kind: 'search' })
   })
 })

@@ -86,6 +86,21 @@ export interface IssueWriteResult {
   reason?: string
 }
 
+export interface ReleaseItem {
+  tagName: string
+  name: string
+  draft: boolean
+  prerelease: boolean
+  author: string
+  publishedAt: string
+  url: string
+}
+
+export interface BranchItem {
+  name: string
+  sha: string
+}
+
 export type IssueState = 'open' | 'closed' | 'all'
 
 export class GithubError extends Error {
@@ -368,5 +383,58 @@ export class GithubClient {
       }
       throw error
     }
+  }
+
+  async mergePr(owner: string, repo: string, prNumber: number, options: { mergeMethod?: 'merge' | 'squash' | 'rebase'; signal?: AbortSignal } = {}): Promise<IssueWriteResult> {
+    try {
+      const data = await this.request<{ merged: boolean; html_url: string }>(
+        `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/pulls/${prNumber}/merge`,
+        { method: 'PUT', body: { merge_method: options.mergeMethod ?? 'merge' }, signal: options.signal },
+      )
+      return { ok: data.merged, number: prNumber, url: data.html_url }
+    } catch (error) {
+      if (error instanceof GithubError && (error.status === 405 || error.status === 409)) {
+        return { ok: false, number: prNumber, reason: 'Pull request is not mergeable (e.g. conflicts, pending checks, or already merged).' }
+      }
+      if (error instanceof GithubError && error.status === 404) {
+        return { ok: false, number: prNumber, reason: 'Pull request not found.' }
+      }
+      throw error
+    }
+  }
+
+  async listReleases(owner: string, repo: string, options: { perPage?: number; signal?: AbortSignal } = {}): Promise<ReleaseItem[]> {
+    const params = new URLSearchParams({
+      per_page: String(Math.max(1, Math.min(options.perPage ?? 10, 100))),
+    })
+    const data = await this.request<Array<{
+      tag_name: string
+      name: string
+      draft: boolean
+      prerelease: boolean
+      author: { login: string } | null
+      published_at: string | null
+      html_url: string
+    }>>(`/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/releases?${params}`, { signal: options.signal })
+    return data.map(item => ({
+      tagName: item.tag_name,
+      name: item.name,
+      draft: item.draft,
+      prerelease: item.prerelease,
+      author: item.author?.login ?? 'unknown',
+      publishedAt: item.published_at ?? '',
+      url: item.html_url,
+    }))
+  }
+
+  async listBranches(owner: string, repo: string, options: { perPage?: number; signal?: AbortSignal } = {}): Promise<BranchItem[]> {
+    const params = new URLSearchParams({
+      per_page: String(Math.max(1, Math.min(options.perPage ?? 20, 100))),
+    })
+    const data = await this.request<Array<{ name: string; commit: { sha: string } }>>(
+      `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/branches?${params}`,
+      { signal: options.signal },
+    )
+    return data.map(item => ({ name: item.name, sha: item.commit.sha.slice(0, 7) }))
   }
 }

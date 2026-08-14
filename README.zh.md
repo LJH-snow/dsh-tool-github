@@ -44,6 +44,9 @@ npm install dsh-tool-github
 | `github_create_issue` | 创建 issue（title 必填，body/labels 可选） | 是 |
 | `github_comment_issue` | 评论 issue 或 PR | 是 |
 | `github_update_issue` | 打开/关闭 issue | 是 |
+| `github_merge_pr` | 合并 PR（merge/squash/rebase；需 token） | 是 |
+| `github_list_releases` | 列出发布（tag、draft/prerelease、作者） | 否 |
+| `github_list_branches` | 列出分支及最新 SHA | 否 |
 | `github_create_pr_draft` | 创建 draft PR（head/base/title/body） | 是 |
 
 ### 行为约定（遵循官方 execute 契约）

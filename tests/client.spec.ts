@@ -207,3 +207,56 @@ describe('GithubClient write operations', () => {
     expect(missing).toMatchObject({ ok: false })
   })
 })
+
+describe('GithubClient stage 7', () => {
+  it('mergePr PUTs merge_method and returns ok', async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse(200, { merged: true, html_url: 'https://github.com/a/b/pull/5' }))
+    const client = new GithubClient({ token: 'ghp_test', fetchImpl })
+    const result = await client.mergePr('a', 'b', 5, { mergeMethod: 'squash' })
+    const [url, init] = fetchImpl.mock.calls[0] as [string, RequestInit]
+    expect(url).toContain('/repos/a/b/pulls/5/merge')
+    expect(init.method).toBe('PUT')
+    expect(JSON.parse(String(init.body))).toEqual({ merge_method: 'squash' })
+    expect(result).toEqual({ ok: true, number: 5, url: 'https://github.com/a/b/pull/5' })
+  })
+
+  it('mergePr maps 405 and 409 to business failures', async () => {
+    for (const status of [405, 409]) {
+      const client = new GithubClient({ token: 'ghp_test', fetchImpl: vi.fn(async () => jsonResponse(status, {})) })
+      const result = await client.mergePr('a', 'b', 5)
+      expect(result.ok).toBe(false)
+      expect(result.reason).toBeTruthy()
+    }
+  })
+
+  it('mergePr maps 404 to not found', async () => {
+    const client = new GithubClient({ token: 'ghp_test', fetchImpl: vi.fn(async () => jsonResponse(404, {})) })
+    const result = await client.mergePr('a', 'b', 999)
+    expect(result).toMatchObject({ ok: false, reason: expect.stringContaining('not found') })
+  })
+
+  it('listReleases maps items', async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse(200, [
+      { tag_name: 'v1.0.0', name: 'Release One', draft: false, prerelease: false, author: { login: 'carol' }, published_at: '2026-01-01T00:00:00Z', html_url: 'https://github.com/a/b/releases/v1' },
+    ]))
+    const client = new GithubClient({ fetchImpl })
+    const releases = await client.listReleases('a', 'b', { perPage: 5 })
+    const [url] = fetchImpl.mock.calls[0] as [string]
+    expect(url).toContain('/repos/a/b/releases?')
+    expect(url).toContain('per_page=5')
+    expect(releases[0]).toMatchObject({ tagName: 'v1.0.0', author: 'carol' })
+  })
+
+  it('listBranches maps items with short SHA', async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse(200, [
+      { name: 'main', commit: { sha: 'abcdef1234567890' } },
+      { name: 'dev', commit: { sha: '1234567890abcdef' } },
+    ]))
+    const client = new GithubClient({ fetchImpl })
+    const branches = await client.listBranches('a', 'b', { perPage: 2 })
+    expect(branches).toEqual([
+      { name: 'main', sha: 'abcdef1' },
+      { name: 'dev', sha: '1234567' },
+    ])
+  })
+})

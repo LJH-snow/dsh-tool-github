@@ -578,6 +578,161 @@ export function createTools(client: GithubClient) {
     }),
 
     defineTool({
+      name: 'github_merge_pr',
+      description: 'Merge a GitHub pull request. WRITE operation: requires a configured token and affects the remote repository. Only merges when the PR is mergeable.',
+      parameters: {
+        owner: { type: 'string', required: true, description: 'Repository owner' },
+        repo: { type: 'string', required: true, description: 'Repository name' },
+        prNumber: { type: 'integer', required: true, description: 'Pull request number' },
+        mergeMethod: { type: 'string', enum: ['merge', 'squash', 'rebase'], description: 'Merge method (default merge)' },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            ok: { type: 'boolean', description: 'Whether the PR was merged' },
+            number: { type: 'integer', description: 'PR number' },
+            url: { type: 'string', description: 'PR URL' },
+            reason: { type: 'string', description: 'Explanation when not merged' },
+          },
+        },
+        render: (_args, value) => {
+          if (value.ok) return [{ type: 'text', text: `Merged PR #${value.number}: ${value.url}` }]
+          return [{ type: 'text', text: `Could not merge PR #${value.number}: ${value.reason}` }]
+        },
+      },
+      presentCall(args): ToolCallView {
+        return { card: 'generic', title: `Merge PR #${args.prNumber}`, kind: 'edit' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { ok?: boolean; number?: number; url?: string; reason?: string }
+        if (v.ok) return { card: 'generic', title: `PR #${v.number} merged`, content: [{ type: 'text', text: v.url ?? '' }] }
+        return { card: 'generic', title: `Merge PR #${v.number} failed`, content: [{ type: 'text', text: v.reason ?? 'Unknown' }] }
+      },
+      async execute(args, exec) {
+        if (!client.hasToken()) {
+          return { ok: false, number: args.prNumber, reason: 'Merging a PR requires a GitHub token. Configure the plugin with a token.' }
+        }
+        return client.mergePr(args.owner, args.repo, args.prNumber, { mergeMethod: args.mergeMethod, signal: exec.signal })
+      },
+    }),
+
+    defineTool({
+      name: 'github_list_releases',
+      description: 'List releases of a GitHub repository, including tag, name, draft/prerelease status, author, and publish time.',
+      parameters: {
+        owner: { type: 'string', required: true, description: 'Repository owner' },
+        repo: { type: 'string', required: true, description: 'Repository name' },
+        limit: { type: 'integer', description: 'Maximum results, 1-20 (default 10)' },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            items: {
+              type: 'array',
+              items: {
+                type: 'object',
+                additionalProperties: false,
+                properties: {
+                  tagName: { type: 'string', description: 'Release tag' },
+                  name: { type: 'string', description: 'Release name' },
+                  draft: { type: 'boolean', description: 'Whether this is a draft release' },
+                  prerelease: { type: 'boolean', description: 'Whether this is a prerelease' },
+                  author: { type: 'string', description: 'Release author login' },
+                  publishedAt: { type: 'string', description: 'ISO publish timestamp' },
+                  url: { type: 'string', description: 'Release URL' },
+                },
+              },
+            },
+          },
+        },
+        render: (_args, value) => {
+          const items = value.items ?? []
+          if (items.length === 0) return [{ type: 'text', text: 'No releases found.' }]
+          const lines = items.map(item => {
+            const flags = [item.draft ? 'draft' : '', item.prerelease ? 'pre' : ''].filter(Boolean).join('+')
+            const flagText = flags ? ` [${flags}]` : ''
+            return `${item.tagName} — ${item.name ?? ''} (@${item.author}, ${item.publishedAt})${flagText}`
+          })
+          return [{ type: 'text', text: lines.join('\n') }]
+        },
+      },
+      presentCall(args): ToolCallView {
+        return { card: 'generic', title: `Releases: ${args.owner}/${args.repo}`, kind: 'search' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { items?: Array<{ tagName: string }> }
+        const items = v.items ?? []
+        if (items.length === 0) return { card: 'generic', title: 'No releases' }
+        return {
+          card: 'generic',
+          title: `${items.length} release(s)`,
+          content: [{ type: 'text', text: items.map(i => i.tagName).join('\n') }],
+        }
+      },
+      async execute(args, exec) {
+        const limit = args.limit === undefined ? 10 : Math.max(1, Math.min(args.limit, 20))
+        const items = await client.listReleases(args.owner, args.repo, { perPage: limit, signal: exec.signal })
+        return { items }
+      },
+    }),
+
+    defineTool({
+      name: 'github_list_branches',
+      description: 'List branches of a GitHub repository with their latest commit SHAs.',
+      parameters: {
+        owner: { type: 'string', required: true, description: 'Repository owner' },
+        repo: { type: 'string', required: true, description: 'Repository name' },
+        limit: { type: 'integer', description: 'Maximum results, 1-50 (default 20)' },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            items: {
+              type: 'array',
+              items: {
+                type: 'object',
+                additionalProperties: false,
+                properties: {
+                  name: { type: 'string', description: 'Branch name' },
+                  sha: { type: 'string', description: 'Latest commit short SHA' },
+                },
+              },
+            },
+          },
+        },
+        render: (_args, value) => {
+          const items = value.items ?? []
+          if (items.length === 0) return [{ type: 'text', text: 'No branches found.' }]
+          return [{ type: 'text', text: items.map(i => `${i.name} (${i.sha})`).join('\n') }]
+        },
+      },
+      presentCall(args): ToolCallView {
+        return { card: 'generic', title: `Branches: ${args.owner}/${args.repo}`, kind: 'search' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { items?: Array<{ name: string }> }
+        const items = v.items ?? []
+        if (items.length === 0) return { card: 'generic', title: 'No branches' }
+        return {
+          card: 'generic',
+          title: `${items.length} branch(es)`,
+          content: [{ type: 'text', text: items.map(i => i.name).join('\n') }],
+        }
+      },
+      async execute(args, exec) {
+        const limit = args.limit === undefined ? 20 : Math.max(1, Math.min(args.limit, 50))
+        const items = await client.listBranches(args.owner, args.repo, { perPage: limit, signal: exec.signal })
+        return { items }
+      },
+    }),
+
+    defineTool({
       name: 'github_create_pr_draft',
       description: 'Create a draft pull request on GitHub. Returns the PR number and URL when created.',
       parameters: {
