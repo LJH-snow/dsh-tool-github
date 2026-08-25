@@ -90,6 +90,14 @@ Full example: [examples/cordis.yml](examples/cordis.yml).
 | `github_set_repo_topics` | Set the complete topic list for a repository | yes |
 | `github_list_gists` | List user or public gists | no |
 | `github_create_gist` | Create a public or secret gist | yes |
+| `github_list_repo_variables` | List Actions repository variables | yes |
+| `github_set_repo_variable` | Create or update an Actions repository variable | yes |
+| `github_delete_repo_variable` | Delete an Actions repository variable | yes |
+| `github_list_repo_secrets` | List Actions repository secret metadata | yes |
+| `github_delete_repo_secret` | Delete an Actions repository secret | yes |
+| `github_get_branch_protection` | Read branch protection rules | no |
+| `github_set_branch_protection` | Update branch protection rules | yes |
+| `github_delete_branch_protection` | Delete branch protection rules | yes |
 | `github_create_pr_draft` | Create a draft PR (head/base/title/body) | yes |
 
 ### Behavior contract (per the official execute contract)

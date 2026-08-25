@@ -2243,5 +2243,400 @@ export function createTools(client: GithubClient) {
         }, exec.signal)
       },
     }),
+
+    defineTool({
+      name: 'github_list_repo_variables',
+      description: 'List GitHub Actions variables for a repository. Requires a token with repository administration access.',
+      parameters: {
+        owner: { type: 'string', required: true, description: 'Repository owner' },
+        repo: { type: 'string', required: true, description: 'Repository name' },
+        limit: { type: 'integer', description: 'Maximum results, 1-50 (default 30)' },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            found: { type: 'boolean', description: 'Whether the repository exists and is accessible' },
+            total: { type: 'integer', description: 'Total variable count' },
+            reason: { type: 'string', description: 'Explanation when variables are not accessible' },
+            items: {
+              type: 'array',
+              items: {
+                type: 'object',
+                additionalProperties: false,
+                properties: {
+                  name: { type: 'string', description: 'Variable name' },
+                  value: { type: 'string', description: 'Variable value' },
+                  createdAt: { type: 'string', description: 'ISO creation timestamp' },
+                  updatedAt: { type: 'string', description: 'ISO update timestamp' },
+                },
+              },
+            },
+          },
+        },
+        render: (_args, value) => {
+          if (!value.found) return [{ type: 'text', text: 'Repository variables not found or not accessible.' }]
+          const items = value.items ?? []
+          if (items.length === 0) return [{ type: 'text', text: 'No repository variables found.' }]
+          const lines = items.map(item => `${item.name}=${item.value} (updated ${item.updatedAt})`)
+          return [{ type: 'text', text: `Found ${value.total ?? items.length} variables:\n${lines.join('\n')}` }]
+        },
+      },
+      presentCall(args): ToolCallView {
+        return { card: 'generic', title: `Variables: ${args.owner}/${args.repo}`, kind: 'search' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { found?: boolean; total?: number; items?: Array<{ name: string }> }
+        if (!v.found) return { card: 'generic', title: 'Variables not found' }
+        const items = v.items ?? []
+        if (items.length === 0) return { card: 'generic', title: 'No variables' }
+        return { card: 'generic', title: `${v.total ?? items.length} variable(s)`, content: [{ type: 'text', text: items.map(i => i.name).join('\n') }] }
+      },
+      async execute(args, exec) {
+        if (!client.hasToken()) {
+          return { found: false, total: 0, items: [], reason: 'Listing repository variables requires a GitHub token. Configure the plugin with a token.' }
+        }
+        const limit = args.limit === undefined ? 30 : Math.max(1, Math.min(args.limit as number, 50))
+        return client.listRepoVariables(args.owner as string, args.repo as string, { perPage: limit, signal: exec.signal })
+      },
+    }),
+
+    defineTool({
+      name: 'github_set_repo_variable',
+      description: 'Create or update a GitHub Actions repository variable. WRITE operation: requires a token.',
+      parameters: {
+        owner: { type: 'string', required: true, description: 'Repository owner' },
+        repo: { type: 'string', required: true, description: 'Repository name' },
+        name: { type: 'string', required: true, description: 'Variable name, e.g. DEPLOY_TARGET' },
+        value: { type: 'string', required: true, description: 'Variable value' },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            ok: { type: 'boolean', description: 'Whether the variable was saved' },
+            name: { type: 'string', description: 'Variable name' },
+            created: { type: 'boolean', description: 'Whether the variable was created' },
+            updated: { type: 'boolean', description: 'Whether an existing variable was updated' },
+            reason: { type: 'string', description: 'Explanation when not saved' },
+          },
+        },
+        render: (_args, value) => {
+          if (value.ok) return [{ type: 'text', text: `Saved variable ${value.name}${value.updated ? ' (updated)' : ' (created)'}` }]
+          return [{ type: 'text', text: `Could not save variable ${value.name}: ${value.reason}` }]
+        },
+      },
+      presentCall(args): ToolCallView {
+        return { card: 'generic', title: `Save variable ${args.name}`, kind: 'edit' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { ok?: boolean; name?: string; updated?: boolean; reason?: string }
+        if (v.ok) return { card: 'generic', title: `Variable ${v.name} saved`, content: [{ type: 'text', text: v.updated ? 'updated' : 'created' }] }
+        return { card: 'generic', title: 'Save variable failed', content: [{ type: 'text', text: v.reason ?? 'Unknown' }] }
+      },
+      async execute(args, exec) {
+        if (!client.hasToken()) {
+          return { ok: false, name: args.name as string, reason: 'Setting a repository variable requires a GitHub token. Configure the plugin with a token.' }
+        }
+        return client.setRepoVariable(args.owner as string, args.repo as string, args.name as string, args.value as string, exec.signal)
+      },
+    }),
+
+    defineTool({
+      name: 'github_delete_repo_variable',
+      description: 'Delete a GitHub Actions repository variable. WRITE operation: requires a token.',
+      parameters: {
+        owner: { type: 'string', required: true, description: 'Repository owner' },
+        repo: { type: 'string', required: true, description: 'Repository name' },
+        name: { type: 'string', required: true, description: 'Variable name' },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            ok: { type: 'boolean', description: 'Whether the variable was deleted' },
+            name: { type: 'string', description: 'Variable name' },
+            reason: { type: 'string', description: 'Explanation when not deleted' },
+          },
+        },
+        render: (_args, value) => {
+          if (value.ok) return [{ type: 'text', text: `Deleted variable ${value.name}` }]
+          return [{ type: 'text', text: `Could not delete variable ${value.name}: ${value.reason}` }]
+        },
+      },
+      presentCall(args): ToolCallView {
+        return { card: 'generic', title: `Delete variable ${args.name}`, kind: 'edit' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { ok?: boolean; name?: string; reason?: string }
+        if (v.ok) return { card: 'generic', title: `Variable ${v.name} deleted` }
+        return { card: 'generic', title: 'Delete variable failed', content: [{ type: 'text', text: v.reason ?? 'Unknown' }] }
+      },
+      async execute(args, exec) {
+        if (!client.hasToken()) {
+          return { ok: false, name: args.name as string, reason: 'Deleting a repository variable requires a GitHub token. Configure the plugin with a token.' }
+        }
+        return client.deleteRepoVariable(args.owner as string, args.repo as string, args.name as string, exec.signal)
+      },
+    }),
+
+    defineTool({
+      name: 'github_list_repo_secrets',
+      description: 'List GitHub Actions repository secret names and timestamps. Values are never returned. Requires a token with repository administration access.',
+      parameters: {
+        owner: { type: 'string', required: true, description: 'Repository owner' },
+        repo: { type: 'string', required: true, description: 'Repository name' },
+        limit: { type: 'integer', description: 'Maximum results, 1-50 (default 30)' },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            found: { type: 'boolean', description: 'Whether the repository exists and is accessible' },
+            total: { type: 'integer', description: 'Total secret count' },
+            reason: { type: 'string', description: 'Explanation when secrets are not accessible' },
+            items: {
+              type: 'array',
+              items: {
+                type: 'object',
+                additionalProperties: false,
+                properties: {
+                  name: { type: 'string', description: 'Secret name' },
+                  createdAt: { type: 'string', description: 'ISO creation timestamp' },
+                  updatedAt: { type: 'string', description: 'ISO update timestamp' },
+                },
+              },
+            },
+          },
+        },
+        render: (_args, value) => {
+          if (!value.found) return [{ type: 'text', text: 'Repository secrets not found or not accessible.' }]
+          const items = value.items ?? []
+          if (items.length === 0) return [{ type: 'text', text: 'No repository secrets found.' }]
+          const lines = items.map(item => `${item.name} (updated ${item.updatedAt})`)
+          return [{ type: 'text', text: `Found ${value.total ?? items.length} secrets:\n${lines.join('\n')}` }]
+        },
+      },
+      presentCall(args): ToolCallView {
+        return { card: 'generic', title: `Secrets: ${args.owner}/${args.repo}`, kind: 'search' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { found?: boolean; total?: number; items?: Array<{ name: string }> }
+        if (!v.found) return { card: 'generic', title: 'Secrets not found' }
+        const items = v.items ?? []
+        if (items.length === 0) return { card: 'generic', title: 'No secrets' }
+        return { card: 'generic', title: `${v.total ?? items.length} secret(s)`, content: [{ type: 'text', text: items.map(i => i.name).join('\n') }] }
+      },
+      async execute(args, exec) {
+        if (!client.hasToken()) {
+          return { found: false, total: 0, items: [], reason: 'Listing repository secrets requires a GitHub token. Configure the plugin with a token.' }
+        }
+        const limit = args.limit === undefined ? 30 : Math.max(1, Math.min(args.limit as number, 50))
+        return client.listRepoSecrets(args.owner as string, args.repo as string, { perPage: limit, signal: exec.signal })
+      },
+    }),
+
+    defineTool({
+      name: 'github_delete_repo_secret',
+      description: 'Delete a GitHub Actions repository secret. WRITE operation: requires a token.',
+      parameters: {
+        owner: { type: 'string', required: true, description: 'Repository owner' },
+        repo: { type: 'string', required: true, description: 'Repository name' },
+        name: { type: 'string', required: true, description: 'Secret name' },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            ok: { type: 'boolean', description: 'Whether the secret was deleted' },
+            name: { type: 'string', description: 'Secret name' },
+            reason: { type: 'string', description: 'Explanation when not deleted' },
+          },
+        },
+        render: (_args, value) => {
+          if (value.ok) return [{ type: 'text', text: `Deleted secret ${value.name}` }]
+          return [{ type: 'text', text: `Could not delete secret ${value.name}: ${value.reason}` }]
+        },
+      },
+      presentCall(args): ToolCallView {
+        return { card: 'generic', title: `Delete secret ${args.name}`, kind: 'edit' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { ok?: boolean; name?: string; reason?: string }
+        if (v.ok) return { card: 'generic', title: `Secret ${v.name} deleted` }
+        return { card: 'generic', title: 'Delete secret failed', content: [{ type: 'text', text: v.reason ?? 'Unknown' }] }
+      },
+      async execute(args, exec) {
+        if (!client.hasToken()) {
+          return { ok: false, name: args.name as string, reason: 'Deleting a repository secret requires a GitHub token. Configure the plugin with a token.' }
+        }
+        return client.deleteRepoSecret(args.owner as string, args.repo as string, args.name as string, exec.signal)
+      },
+    }),
+
+    defineTool({
+      name: 'github_get_branch_protection',
+      description: 'Get branch protection rules for a GitHub branch: status checks, review requirements, admins, force pushes, deletions, and linear history.',
+      parameters: {
+        owner: { type: 'string', required: true, description: 'Repository owner' },
+        repo: { type: 'string', required: true, description: 'Repository name' },
+        branch: { type: 'string', required: true, description: 'Branch name, e.g. main' },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            found: { type: 'boolean', description: 'Whether branch protection is configured' },
+            enabled: { type: 'boolean', description: 'Whether protection is enabled' },
+            contexts: { type: 'array', items: { type: 'string' }, description: 'Required status check contexts' },
+            strict: { type: 'boolean', description: 'Whether status checks must be up to date' },
+            enforceAdmins: { type: 'boolean', description: 'Whether admins must follow the rules' },
+            requiredApprovingReviewCount: { type: 'integer', description: 'Required approving reviews' },
+            dismissStaleReviews: { type: 'boolean', description: 'Whether stale reviews are dismissed' },
+            requireCodeOwnerReviews: { type: 'boolean', description: 'Whether code owner reviews are required' },
+            requiredLinearHistory: { type: 'boolean', description: 'Whether linear history is required' },
+            allowForcePushes: { type: 'boolean', description: 'Whether force pushes are allowed' },
+            allowDeletions: { type: 'boolean', description: 'Whether deletions are allowed' },
+            requiredConversationResolution: { type: 'boolean', description: 'Whether resolved conversations are required' },
+            url: { type: 'string', description: 'Protection API URL' },
+          },
+        },
+        render: (_args, value) => {
+          if (!value.found) return [{ type: 'text', text: 'No branch protection is configured for this branch.' }]
+          const checks = (value.contexts ?? []).length > 0 ? `checks: ${(value.contexts ?? []).join(', ')}` : 'checks: none'
+          return [{ type: 'text', text: [
+            `Branch protection enabled`,
+            checks,
+            `reviews: ${value.requiredApprovingReviewCount ?? 0} required${value.dismissStaleReviews ? ', stale reviews dismissed' : ''}${value.requireCodeOwnerReviews ? ', code owners required' : ''}`,
+            `admins: ${value.enforceAdmins ? 'enforced' : 'not enforced'}`,
+            `linear history: ${value.requiredLinearHistory ? 'required' : 'off'}`,
+            `force pushes: ${value.allowForcePushes ? 'allowed' : 'blocked'}`,
+            `deletions: ${value.allowDeletions ? 'allowed' : 'blocked'}`,
+          ].join('\n') }]
+        },
+      },
+      presentCall(args): ToolCallView {
+        return { card: 'generic', title: `Branch protection: ${args.owner}/${args.repo}#${args.branch}`, kind: 'read' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { found?: boolean; contexts?: string[]; requiredApprovingReviewCount?: number }
+        if (!v.found) return { card: 'generic', title: 'No branch protection' }
+        return {
+          card: 'generic',
+          title: 'Branch protection enabled',
+          content: [{ type: 'text', text: `${v.requiredApprovingReviewCount ?? 0} reviews, ${(v.contexts ?? []).length} checks` }],
+        }
+      },
+      async execute(args, exec) {
+        return client.getBranchProtection(args.owner as string, args.repo as string, args.branch as string, exec.signal)
+      },
+    }),
+
+    defineTool({
+      name: 'github_set_branch_protection',
+      description: 'Set branch protection rules on a GitHub branch. WRITE operation: requires a token and overwrites existing rules.',
+      parameters: {
+        owner: { type: 'string', required: true, description: 'Repository owner' },
+        repo: { type: 'string', required: true, description: 'Repository name' },
+        branch: { type: 'string', required: true, description: 'Branch name, e.g. main' },
+        requiredStatusChecks: { type: 'array', items: { type: 'string' }, description: 'Required status check contexts' },
+        strictRequiredStatusChecks: { type: 'boolean', description: 'Require status checks to be up to date (default true)' },
+        enforceAdmins: { type: 'boolean', description: 'Apply rules to admins (default true)' },
+        requiredApprovingReviewCount: { type: 'integer', description: 'Required approving reviews, 0 disables PR review rules' },
+        dismissStaleReviews: { type: 'boolean', description: 'Dismiss stale PR reviews (default false)' },
+        requireCodeOwnerReviews: { type: 'boolean', description: 'Require code owner reviews (default false)' },
+        requiredLinearHistory: { type: 'boolean', description: 'Require linear history (default false)' },
+        allowForcePushes: { type: 'boolean', description: 'Allow force pushes (default false)' },
+        allowDeletions: { type: 'boolean', description: 'Allow branch deletion (default false)' },
+        requiredConversationResolution: { type: 'boolean', description: 'Require resolved conversations (default false)' },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            ok: { type: 'boolean', description: 'Whether branch protection was updated' },
+            branch: { type: 'string', description: 'Branch name' },
+            url: { type: 'string', description: 'Protection API URL' },
+            reason: { type: 'string', description: 'Explanation when not updated' },
+          },
+        },
+        render: (_args, value) => {
+          if (value.ok) return [{ type: 'text', text: `Updated branch protection for ${value.branch}: ${value.url}` }]
+          return [{ type: 'text', text: `Could not update branch protection for ${value.branch}: ${value.reason}` }]
+        },
+      },
+      presentCall(args): ToolCallView {
+        return { card: 'generic', title: `Set branch protection: ${args.branch}`, kind: 'edit' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { ok?: boolean; branch?: string; url?: string; reason?: string }
+        if (v.ok) return { card: 'generic', title: `Protection updated for ${v.branch}`, content: [{ type: 'text', text: v.url ?? '' }] }
+        return { card: 'generic', title: 'Update protection failed', content: [{ type: 'text', text: v.reason ?? 'Unknown' }] }
+      },
+      async execute(args, exec) {
+        if (!client.hasToken()) {
+          return { ok: false, branch: args.branch as string, reason: 'Setting branch protection requires a GitHub token. Configure the plugin with a token.' }
+        }
+        const reviewCount = args.requiredApprovingReviewCount === undefined ? undefined : Math.max(0, Math.min(args.requiredApprovingReviewCount as number, 10))
+        return client.setBranchProtection(args.owner as string, args.repo as string, args.branch as string, {
+          requiredStatusChecks: args.requiredStatusChecks as string[] | undefined,
+          strictRequiredStatusChecks: args.strictRequiredStatusChecks as boolean | undefined,
+          enforceAdmins: args.enforceAdmins as boolean | undefined,
+          requiredApprovingReviewCount: reviewCount,
+          dismissStaleReviews: args.dismissStaleReviews as boolean | undefined,
+          requireCodeOwnerReviews: args.requireCodeOwnerReviews as boolean | undefined,
+          requiredLinearHistory: args.requiredLinearHistory as boolean | undefined,
+          allowForcePushes: args.allowForcePushes as boolean | undefined,
+          allowDeletions: args.allowDeletions as boolean | undefined,
+          requiredConversationResolution: args.requiredConversationResolution as boolean | undefined,
+        }, exec.signal)
+      },
+    }),
+
+    defineTool({
+      name: 'github_delete_branch_protection',
+      description: 'Delete branch protection rules on a GitHub branch. WRITE operation: requires a token.',
+      parameters: {
+        owner: { type: 'string', required: true, description: 'Repository owner' },
+        repo: { type: 'string', required: true, description: 'Repository name' },
+        branch: { type: 'string', required: true, description: 'Branch name' },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            ok: { type: 'boolean', description: 'Whether branch protection was deleted' },
+            branch: { type: 'string', description: 'Branch name' },
+            reason: { type: 'string', description: 'Explanation when not deleted' },
+          },
+        },
+        render: (_args, value) => {
+          if (value.ok) return [{ type: 'text', text: `Deleted branch protection for ${value.branch}` }]
+          return [{ type: 'text', text: `Could not delete branch protection for ${value.branch}: ${value.reason}` }]
+        },
+      },
+      presentCall(args): ToolCallView {
+        return { card: 'generic', title: `Delete branch protection: ${args.branch}`, kind: 'edit' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { ok?: boolean; branch?: string; reason?: string }
+        if (v.ok) return { card: 'generic', title: `Protection deleted for ${v.branch}` }
+        return { card: 'generic', title: 'Delete protection failed', content: [{ type: 'text', text: v.reason ?? 'Unknown' }] }
+      },
+      async execute(args, exec) {
+        if (!client.hasToken()) {
+          return { ok: false, branch: args.branch as string, reason: 'Deleting branch protection requires a GitHub token. Configure the plugin with a token.' }
+        }
+        return client.deleteBranchProtection(args.owner as string, args.repo as string, args.branch as string, exec.signal)
+      },
+    }),
   ]
 }

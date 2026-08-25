@@ -60,6 +60,68 @@ export interface GistCreateResult {
   reason?: string
 }
 
+export interface RepoVariableItem {
+  name: string
+  value: string
+  createdAt: string
+  updatedAt: string
+}
+
+export interface RepoVariableListResult {
+  found: boolean
+  total: number
+  items: RepoVariableItem[]
+}
+
+export interface RepoVariableWriteResult {
+  ok: boolean
+  name?: string
+  created?: boolean
+  updated?: boolean
+  reason?: string
+}
+
+export interface RepoSecretItem {
+  name: string
+  createdAt: string
+  updatedAt: string
+}
+
+export interface RepoSecretListResult {
+  found: boolean
+  total: number
+  items: RepoSecretItem[]
+}
+
+export interface RepoSecretDeleteResult {
+  ok: boolean
+  name?: string
+  reason?: string
+}
+
+export interface BranchProtectionDetail {
+  found: boolean
+  enabled?: boolean
+  contexts?: string[]
+  strict?: boolean
+  enforceAdmins?: boolean
+  requiredApprovingReviewCount?: number
+  dismissStaleReviews?: boolean
+  requireCodeOwnerReviews?: boolean
+  requiredLinearHistory?: boolean
+  allowForcePushes?: boolean
+  allowDeletions?: boolean
+  requiredConversationResolution?: boolean
+  url?: string
+}
+
+export interface BranchProtectionWriteResult {
+  ok: boolean
+  branch?: string
+  url?: string
+  reason?: string
+}
+
 export interface IssueItem {
   number: number
   title: string
@@ -1035,6 +1097,224 @@ export class GithubClient {
     } catch (error) {
       if (error instanceof GithubError && (error.status === 404 || error.status === 422)) {
         return { ok: false, reason: 'Could not create the gist (invalid files or description).' }
+      }
+      throw error
+    }
+  }
+
+  async listRepoVariables(owner: string, repo: string, options: { perPage?: number; signal?: AbortSignal } = {}): Promise<RepoVariableListResult> {
+    const params = new URLSearchParams({
+      per_page: String(Math.max(1, Math.min(options.perPage ?? 30, 100))),
+    })
+    try {
+      const data = await this.request<{
+        total_count: number
+        variables: Array<{ name: string; value: string; created_at: string; updated_at: string }>
+      }>(`/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/actions/variables?${params}`, { signal: options.signal })
+      return {
+        found: true,
+        total: data.total_count,
+        items: data.variables.map(item => ({
+          name: item.name,
+          value: item.value,
+          createdAt: item.created_at,
+          updatedAt: item.updated_at,
+        })),
+      }
+    } catch (error) {
+      if (error instanceof GithubError && error.status === 404) {
+        return { found: false, total: 0, items: [] }
+      }
+      throw error
+    }
+  }
+
+  async setRepoVariable(owner: string, repo: string, name: string, value: string, signal?: AbortSignal): Promise<RepoVariableWriteResult> {
+    const base = `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/actions/variables`
+    try {
+      await this.request<unknown>(base, { method: 'POST', body: { name, value }, signal })
+      return { ok: true, name, created: true }
+    } catch (error) {
+      if (error instanceof GithubError && error.status === 409) {
+        try {
+          await this.request<unknown>(`${base}/${encodeURIComponent(name)}`, { method: 'PATCH', body: { name, value }, signal })
+          return { ok: true, name, updated: true }
+        } catch (updateError) {
+          if (updateError instanceof GithubError && (updateError.status === 404 || updateError.status === 422)) {
+            return { ok: false, name, reason: 'Could not update the repository variable (not found or invalid value).' }
+          }
+          throw updateError
+        }
+      }
+      if (error instanceof GithubError && (error.status === 404 || error.status === 422)) {
+        return { ok: false, name, reason: 'Could not create or update the repository variable.' }
+      }
+      throw error
+    }
+  }
+
+  async deleteRepoVariable(owner: string, repo: string, name: string, signal?: AbortSignal): Promise<RepoVariableWriteResult> {
+    try {
+      await this.request<unknown>(
+        `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/actions/variables/${encodeURIComponent(name)}`,
+        { method: 'DELETE', signal },
+      )
+      return { ok: true, name }
+    } catch (error) {
+      if (error instanceof GithubError && (error.status === 404 || error.status === 422)) {
+        return { ok: false, name, reason: 'Could not delete the repository variable (not found or invalid name).' }
+      }
+      throw error
+    }
+  }
+
+  async listRepoSecrets(owner: string, repo: string, options: { perPage?: number; signal?: AbortSignal } = {}): Promise<RepoSecretListResult> {
+    const params = new URLSearchParams({
+      per_page: String(Math.max(1, Math.min(options.perPage ?? 30, 100))),
+    })
+    try {
+      const data = await this.request<{
+        total_count: number
+        secrets: Array<{ name: string; created_at: string; updated_at: string }>
+      }>(`/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/actions/secrets?${params}`, { signal: options.signal })
+      return {
+        found: true,
+        total: data.total_count,
+        items: data.secrets.map(item => ({
+          name: item.name,
+          createdAt: item.created_at,
+          updatedAt: item.updated_at,
+        })),
+      }
+    } catch (error) {
+      if (error instanceof GithubError && error.status === 404) {
+        return { found: false, total: 0, items: [] }
+      }
+      throw error
+    }
+  }
+
+  async deleteRepoSecret(owner: string, repo: string, name: string, signal?: AbortSignal): Promise<RepoSecretDeleteResult> {
+    try {
+      await this.request<unknown>(
+        `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/actions/secrets/${encodeURIComponent(name)}`,
+        { method: 'DELETE', signal },
+      )
+      return { ok: true, name }
+    } catch (error) {
+      if (error instanceof GithubError && (error.status === 404 || error.status === 422)) {
+        return { ok: false, name, reason: 'Could not delete the repository secret (not found or invalid name).' }
+      }
+      throw error
+    }
+  }
+
+  async getBranchProtection(owner: string, repo: string, branch: string, signal?: AbortSignal): Promise<BranchProtectionDetail> {
+    try {
+      const data = await this.request<{
+        url: string
+        required_status_checks: {
+          strict: boolean
+          contexts?: string[]
+          checks?: Array<{ context: string }>
+        } | null
+        enforce_admins: { enabled: boolean } | null
+        required_pull_request_reviews: {
+          required_approving_review_count: number
+          dismiss_stale_reviews: boolean
+          require_code_owner_reviews: boolean
+        } | null
+        restrictions: unknown | null
+        required_linear_history: { enabled: boolean } | null
+        allow_force_pushes: { enabled: boolean } | null
+        allow_deletions: { enabled: boolean } | null
+        required_conversation_resolution: { enabled: boolean } | null
+      }>(
+        `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/branches/${encodeURIComponent(branch)}/protection`,
+        { signal },
+      )
+      const checks = data.required_status_checks?.checks ? data.required_status_checks.checks.map(check => check.context) : data.required_status_checks?.contexts ?? []
+      return {
+        found: true,
+        enabled: true,
+        contexts: checks,
+        strict: data.required_status_checks?.strict ?? false,
+        enforceAdmins: data.enforce_admins?.enabled ?? false,
+        requiredApprovingReviewCount: data.required_pull_request_reviews?.required_approving_review_count ?? 0,
+        dismissStaleReviews: data.required_pull_request_reviews?.dismiss_stale_reviews ?? false,
+        requireCodeOwnerReviews: data.required_pull_request_reviews?.require_code_owner_reviews ?? false,
+        requiredLinearHistory: data.required_linear_history?.enabled ?? false,
+        allowForcePushes: data.allow_force_pushes?.enabled ?? false,
+        allowDeletions: data.allow_deletions?.enabled ?? false,
+        requiredConversationResolution: data.required_conversation_resolution?.enabled ?? false,
+        url: data.url,
+      }
+    } catch (error) {
+      if (error instanceof GithubError && error.status === 404) {
+        return { found: false }
+      }
+      throw error
+    }
+  }
+
+  async setBranchProtection(owner: string, repo: string, branch: string, input: {
+    requiredStatusChecks?: string[]
+    strictRequiredStatusChecks?: boolean
+    enforceAdmins?: boolean
+    requiredApprovingReviewCount?: number
+    dismissStaleReviews?: boolean
+    requireCodeOwnerReviews?: boolean
+    requiredLinearHistory?: boolean
+    allowForcePushes?: boolean
+    allowDeletions?: boolean
+    requiredConversationResolution?: boolean
+  }, signal?: AbortSignal): Promise<BranchProtectionWriteResult> {
+    try {
+      const data = await this.request<{ url: string }>(
+        `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/branches/${encodeURIComponent(branch)}/protection`,
+        {
+          method: 'PUT',
+          body: {
+            required_status_checks: input.requiredStatusChecks?.length ? {
+              strict: input.strictRequiredStatusChecks ?? true,
+              contexts: input.requiredStatusChecks,
+            } : null,
+            enforce_admins: input.enforceAdmins ?? true,
+            required_pull_request_reviews: input.requiredApprovingReviewCount ? {
+              required_approving_review_count: input.requiredApprovingReviewCount,
+              dismiss_stale_reviews: input.dismissStaleReviews ?? false,
+              require_code_owner_reviews: input.requireCodeOwnerReviews ?? false,
+            } : null,
+            restrictions: null,
+            required_linear_history: input.requiredLinearHistory ?? false,
+            allow_force_pushes: input.allowForcePushes ?? false,
+            allow_deletions: input.allowDeletions ?? false,
+            required_conversation_resolution: input.requiredConversationResolution ?? false,
+            block_creations: false,
+            lock_branch: false,
+          },
+          signal,
+        },
+      )
+      return { ok: true, branch, url: data.url }
+    } catch (error) {
+      if (error instanceof GithubError && (error.status === 404 || error.status === 409 || error.status === 422)) {
+        return { ok: false, branch, reason: 'Could not update branch protection (not found or invalid settings).' }
+      }
+      throw error
+    }
+  }
+
+  async deleteBranchProtection(owner: string, repo: string, branch: string, signal?: AbortSignal): Promise<BranchProtectionWriteResult> {
+    try {
+      await this.request<unknown>(
+        `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/branches/${encodeURIComponent(branch)}/protection`,
+        { method: 'DELETE', signal },
+      )
+      return { ok: true, branch }
+    } catch (error) {
+      if (error instanceof GithubError && (error.status === 404 || error.status === 422)) {
+        return { ok: false, branch, reason: 'Could not delete branch protection (not found or invalid branch).' }
       }
       throw error
     }

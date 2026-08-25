@@ -24,7 +24,11 @@ describe('tool definitions', () => {
       'github_create_pr_draft',
       'github_create_release',
       'github_create_repository',
+      'github_delete_branch_protection',
+      'github_delete_repo_secret',
+      'github_delete_repo_variable',
       'github_dispatch_workflow',
+      'github_get_branch_protection',
       'github_get_file',
       'github_get_issue',
       'github_get_pull_request',
@@ -43,6 +47,8 @@ describe('tool definitions', () => {
       'github_list_prs',
       'github_list_pull_request_reviews',
       'github_list_releases',
+      'github_list_repo_secrets',
+      'github_list_repo_variables',
       'github_list_tags',
       'github_list_workflow_jobs',
       'github_list_workflow_runs',
@@ -52,7 +58,9 @@ describe('tool definitions', () => {
       'github_rerun_workflow_run',
       'github_search_code',
       'github_search_repos',
+      'github_set_branch_protection',
       'github_set_repo_topics',
+      'github_set_repo_variable',
       'github_star_repo',
       'github_submit_pr_review',
       'github_unstar_repo',
@@ -161,7 +169,11 @@ describe('extended tools (stage 5)', () => {
       'github_create_pr_draft',
       'github_create_release',
       'github_create_repository',
+      'github_delete_branch_protection',
+      'github_delete_repo_secret',
+      'github_delete_repo_variable',
       'github_dispatch_workflow',
+      'github_get_branch_protection',
       'github_get_file',
       'github_get_issue',
       'github_get_pull_request',
@@ -180,6 +192,8 @@ describe('extended tools (stage 5)', () => {
       'github_list_prs',
       'github_list_pull_request_reviews',
       'github_list_releases',
+      'github_list_repo_secrets',
+      'github_list_repo_variables',
       'github_list_tags',
       'github_list_workflow_jobs',
       'github_list_workflow_runs',
@@ -189,7 +203,9 @@ describe('extended tools (stage 5)', () => {
       'github_rerun_workflow_run',
       'github_search_code',
       'github_search_repos',
+      'github_set_branch_protection',
       'github_set_repo_topics',
+      'github_set_repo_variable',
       'github_star_repo',
       'github_submit_pr_review',
       'github_unstar_repo',
@@ -523,5 +539,59 @@ describe('stage 13 tools', () => {
     expect(defs['github_set_repo_topics'].presentCall({ owner: 'a', repo: 'b', topics: ['agent'] })).toMatchObject({ kind: 'edit' })
     expect(defs['github_list_gists'].presentCall({})).toMatchObject({ kind: 'search' })
     expect(defs['github_create_gist'].presentCall({ files: [{ filename: 'a', content: 'b' }] })).toMatchObject({ kind: 'edit' })
+  })
+})
+
+describe('stage 14 tools', () => {
+  it('branch protection reads without a token and returns found:false on 404', async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse(404, {}))
+    const tool = createTools(new GithubClient({ fetchImpl })).find(t => t.name === 'github_get_branch_protection')!
+    expect(await tool.execute({ owner: 'a', repo: 'b', branch: 'main' }, exec())).toEqual({ found: false })
+  })
+
+  it('variables and secrets require a token', async () => {
+    const noToken = Object.fromEntries(createTools(new GithubClient({ fetchImpl: vi.fn() })).map(t => [t.name, t]))
+    const cases: Array<{ name: string; args: Record<string, unknown> }> = [
+      { name: 'github_list_repo_variables', args: { owner: 'a', repo: 'b' } },
+      { name: 'github_set_repo_variable', args: { owner: 'a', repo: 'b', name: 'FOO', value: 'bar' } },
+      { name: 'github_delete_repo_variable', args: { owner: 'a', repo: 'b', name: 'FOO' } },
+      { name: 'github_list_repo_secrets', args: { owner: 'a', repo: 'b' } },
+      { name: 'github_delete_repo_secret', args: { owner: 'a', repo: 'b', name: 'API_KEY' } },
+      { name: 'github_set_branch_protection', args: { owner: 'a', repo: 'b', branch: 'main', requiredApprovingReviewCount: 1 } },
+      { name: 'github_delete_branch_protection', args: { owner: 'a', repo: 'b', branch: 'main' } },
+    ]
+    for (const { name, args } of cases) {
+      const result = await noToken[name].execute(args, exec()) as Record<string, unknown>
+      expect(result.reason).toContain('token')
+    }
+  })
+
+  it('governance write tools pass through with a token', async () => {
+    const variableFetch = vi.fn(async () => jsonResponse(201, {}))
+    const variableTool = createTools(new GithubClient({ token: 'ghp_test', fetchImpl: variableFetch })).find(t => t.name === 'github_set_repo_variable')!
+    expect(await variableTool.execute({ owner: 'a', repo: 'b', name: 'FOO', value: 'bar' }, exec())).toMatchObject({ ok: true, created: true })
+    const [variableUrl, variableInit] = variableFetch.mock.calls[0] as [string, RequestInit]
+    expect(variableUrl).toContain('/actions/variables')
+    expect(JSON.parse(String(variableInit.body))).toEqual({ name: 'FOO', value: 'bar' })
+
+    const secretFetch = vi.fn(async () => new Response(null, { status: 204 }))
+    const secretTool = createTools(new GithubClient({ token: 'ghp_test', fetchImpl: secretFetch })).find(t => t.name === 'github_delete_repo_secret')!
+    expect(await secretTool.execute({ owner: 'a', repo: 'b', name: 'API_KEY' }, exec())).toMatchObject({ ok: true })
+    expect(secretFetch.mock.calls[0][0]).toContain('/actions/secrets/API_KEY')
+
+    const protectionFetch = vi.fn(async () => jsonResponse(200, { url: 'https://x/protection' }))
+    const protectionTool = createTools(new GithubClient({ token: 'ghp_test', fetchImpl: protectionFetch })).find(t => t.name === 'github_set_branch_protection')!
+    expect(await protectionTool.execute({ owner: 'a', repo: 'b', branch: 'main', requiredStatusChecks: ['ci'], requiredApprovingReviewCount: 1 }, exec())).toMatchObject({ ok: true })
+    const [, protectionInit] = protectionFetch.mock.calls[0] as [string, RequestInit]
+    expect(JSON.parse(String(protectionInit.body))).toMatchObject({ required_status_checks: { contexts: ['ci'] }, required_pull_request_reviews: { required_approving_review_count: 1 } })
+  })
+
+  it('presentCall for stage 14 tools', () => {
+    const defs = Object.fromEntries(createTools(new GithubClient()).map(t => [t.name, t])) as any
+    expect(defs['github_list_repo_variables'].presentCall({ owner: 'a', repo: 'b' })).toMatchObject({ kind: 'search' })
+    expect(defs['github_set_repo_variable'].presentCall({ owner: 'a', repo: 'b', name: 'FOO', value: 'bar' })).toMatchObject({ kind: 'edit' })
+    expect(defs['github_list_repo_secrets'].presentCall({ owner: 'a', repo: 'b' })).toMatchObject({ kind: 'search' })
+    expect(defs['github_get_branch_protection'].presentCall({ owner: 'a', repo: 'b', branch: 'main' })).toMatchObject({ kind: 'read' })
+    expect(defs['github_set_branch_protection'].presentCall({ owner: 'a', repo: 'b', branch: 'main', requiredApprovingReviewCount: 1 })).toMatchObject({ kind: 'edit' })
   })
 })

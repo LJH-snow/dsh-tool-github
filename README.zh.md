@@ -92,6 +92,14 @@ npm install /path/to/dsh-tool-github
 | `github_set_repo_topics` | 设置仓库完整 topics 列表 | 是 |
 | `github_list_gists` | 列出当前用户/公开 gist | 否 |
 | `github_create_gist` | 创建公开或私有 gist | 是 |
+| `github_list_repo_variables` | 查看 Actions 仓库 variables | 是 |
+| `github_set_repo_variable` | 创建/更新 Actions 仓库 variable | 是 |
+| `github_delete_repo_variable` | 删除 Actions 仓库 variable | 是 |
+| `github_list_repo_secrets` | 查看 Actions 仓库 secret 元信息 | 是 |
+| `github_delete_repo_secret` | 删除 Actions 仓库 secret | 是 |
+| `github_get_branch_protection` | 查询分支保护规则 | 否 |
+| `github_set_branch_protection` | 更新分支保护规则 | 是 |
+| `github_delete_branch_protection` | 删除分支保护规则 | 是 |
 | `github_create_pr_draft` | 创建 draft PR（head/base/title/body） | 是 |
 
 ### 行为约定（遵循官方 execute 契约）

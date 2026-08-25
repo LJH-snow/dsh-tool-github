@@ -685,3 +685,102 @@ describe('GithubClient stage 13', () => {
     expect((await failed.createGist({ files: [{ filename: 'x', content: 'y' }] })).ok).toBe(false)
   })
 })
+
+describe('GithubClient stage 14', () => {
+  it('listRepoVariables maps variables and per_page', async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse(200, {
+      total_count: 1,
+      variables: [{ name: 'DEPLOY_TARGET', value: 'prod', created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-02T00:00:00Z' }],
+    }))
+    const client = new GithubClient({ token: 'ghp_test', fetchImpl })
+    const result = await client.listRepoVariables('a', 'b', { perPage: 5 })
+    const [url] = fetchImpl.mock.calls[0] as [string]
+    expect(url).toContain('/repos/a/b/actions/variables?')
+    expect(url).toContain('per_page=5')
+    expect(result).toEqual({ found: true, total: 1, items: [{ name: 'DEPLOY_TARGET', value: 'prod', createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-02T00:00:00Z' }] })
+
+    const missing = new GithubClient({ token: 'ghp_test', fetchImpl: vi.fn(async () => jsonResponse(404, {})) })
+    expect(await missing.listRepoVariables('a', 'b')).toEqual({ found: false, total: 0, items: [] })
+  })
+
+  it('setRepoVariable creates and falls back to update on 409', async () => {
+    const fetchImpl = vi.fn(async (url, init) => {
+      if (String((init as RequestInit)?.method) === 'POST') return jsonResponse(409, {})
+      return new Response(null, { status: 204 })
+    })
+    const client = new GithubClient({ token: 'ghp_test', fetchImpl })
+    const result = await client.setRepoVariable('a', 'b', 'DEPLOY_TARGET', 'prod')
+    expect(result).toMatchObject({ ok: true, name: 'DEPLOY_TARGET', updated: true })
+    expect(fetchImpl.mock.calls).toHaveLength(2)
+    const [firstUrl, firstInit] = fetchImpl.mock.calls[0] as [string, RequestInit]
+    const [secondUrl, secondInit] = fetchImpl.mock.calls[1] as [string, RequestInit]
+    expect(firstUrl).toContain('/actions/variables')
+    expect(JSON.parse(String(firstInit.body))).toEqual({ name: 'DEPLOY_TARGET', value: 'prod' })
+    expect(secondUrl).toContain('/actions/variables/DEPLOY_TARGET')
+    expect(secondInit.method).toBe('PATCH')
+  })
+
+  it('deleteRepoVariable and deleteRepoSecret return ok on 204', async () => {
+    const variableClient = new GithubClient({ token: 'ghp_test', fetchImpl: vi.fn(async () => new Response(null, { status: 204 })) })
+    expect(await variableClient.deleteRepoVariable('a', 'b', 'DEPLOY_TARGET')).toEqual({ ok: true, name: 'DEPLOY_TARGET' })
+
+    const secretClient = new GithubClient({ token: 'ghp_test', fetchImpl: vi.fn(async () => new Response(null, { status: 204 })) })
+    expect(await secretClient.deleteRepoSecret('a', 'b', 'API_KEY')).toEqual({ ok: true, name: 'API_KEY' })
+  })
+
+  it('listRepoSecrets maps names and timestamps', async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse(200, {
+      total_count: 1,
+      secrets: [{ name: 'API_KEY', created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-02T00:00:00Z' }],
+    }))
+    const client = new GithubClient({ token: 'ghp_test', fetchImpl })
+    const result = await client.listRepoSecrets('a', 'b', { perPage: 5 })
+    const [url] = fetchImpl.mock.calls[0] as [string]
+    expect(url).toContain('/repos/a/b/actions/secrets?')
+    expect(result).toEqual({ found: true, total: 1, items: [{ name: 'API_KEY', createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-02T00:00:00Z' }] })
+  })
+
+  it('getBranchProtection maps rules and returns found:false on 404', async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse(200, {
+      url: 'https://api.github.com/repos/a/b/branches/main/protection',
+      required_status_checks: { strict: true, checks: [{ context: 'ci' }] },
+      enforce_admins: { enabled: true },
+      required_pull_request_reviews: { required_approving_review_count: 1, dismiss_stale_reviews: true, require_code_owner_reviews: true },
+      restrictions: null,
+      required_linear_history: { enabled: true },
+      allow_force_pushes: { enabled: false },
+      allow_deletions: { enabled: false },
+      required_conversation_resolution: { enabled: false },
+    }))
+    const client = new GithubClient({ fetchImpl })
+    const result = await client.getBranchProtection('a', 'b', 'main')
+    expect(result).toMatchObject({ found: true, enabled: true, contexts: ['ci'], strict: true, enforceAdmins: true, requiredApprovingReviewCount: 1, requiredLinearHistory: true })
+
+    const missing = new GithubClient({ fetchImpl: vi.fn(async () => jsonResponse(404, {})) })
+    expect(await missing.getBranchProtection('a', 'b', 'main')).toEqual({ found: false })
+  })
+
+  it('setBranchProtection PUTs the rule payload and deleteBranchProtection returns ok', async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse(200, { url: 'https://api.github.com/repos/a/b/branches/main/protection' }))
+    const client = new GithubClient({ token: 'ghp_test', fetchImpl })
+    const result = await client.setBranchProtection('a', 'b', 'main', {
+      requiredStatusChecks: ['ci'],
+      strictRequiredStatusChecks: false,
+      requiredApprovingReviewCount: 1,
+      dismissStaleReviews: true,
+      requireCodeOwnerReviews: true,
+    })
+    const [url, init] = fetchImpl.mock.calls[0] as [string, RequestInit]
+    expect(url).toContain('/repos/a/b/branches/main/protection')
+    expect(init.method).toBe('PUT')
+    expect(JSON.parse(String(init.body))).toMatchObject({
+      required_status_checks: { strict: false, contexts: ['ci'] },
+      enforce_admins: true,
+      required_pull_request_reviews: { required_approving_review_count: 1, dismiss_stale_reviews: true, require_code_owner_reviews: true },
+    })
+    expect(result).toMatchObject({ ok: true, branch: 'main' })
+
+    const deleteClient = new GithubClient({ token: 'ghp_test', fetchImpl: vi.fn(async () => new Response(null, { status: 204 })) })
+    expect(await deleteClient.deleteBranchProtection('a', 'b', 'main')).toEqual({ ok: true, branch: 'main' })
+  })
+})
