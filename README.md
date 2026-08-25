@@ -84,6 +84,16 @@ Full example: [examples/cordis.yml](examples/cordis.yml).
 | `github_list_team_repos` | List repositories accessible to an organization team | yes |
 | `github_update_team_membership` | Add a team member or change their role | yes |
 | `github_remove_team_membership` | Remove a user from an organization team | yes |
+| `github_list_repo_webhooks` | List repository webhooks with events, payload config, and delivery endpoints | yes |
+| `github_get_repo_webhook` | Get one repository webhook configuration | yes |
+| `github_create_repo_webhook` | Create a repository webhook (events, secret, content type, active state) | yes |
+| `github_update_repo_webhook` | Update webhook URL, events, secret, or active state | yes |
+| `github_delete_repo_webhook` | Delete a repository webhook | yes |
+| `github_ping_repo_webhook` | Send a ping to a repository webhook | yes |
+| `github_list_release_assets` | List Release assets with size, downloads, and download URLs | yes |
+| `github_get_release_asset` | Get one Release asset metadata | yes |
+| `github_update_release_asset` | Rename a Release asset or update its label | yes |
+| `github_delete_release_asset` | Delete a Release asset | yes |
 | `github_list_workflow_runs` | List Actions runs (workflow, branch, status) | no* |
 | `github_list_workflows` | List Actions workflows (name, path, state) | no* |
 | `github_get_workflow` | Get a workflow detail | no* |

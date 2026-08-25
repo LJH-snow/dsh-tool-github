@@ -505,6 +505,52 @@ export interface TeamMembershipResult {
   reason?: string
 }
 
+export interface WebhookItem {
+  id: number
+  name: string
+  active: boolean
+  events: string[]
+  config: {
+    url: string
+    contentType: string
+    insecureSsl: string | null
+  }
+  url: string
+  pingUrl: string
+  deliveriesUrl: string
+  testUrl: string
+  createdAt: string
+  updatedAt: string
+}
+
+export interface WebhookWriteResult {
+  ok: boolean
+  id?: number
+  url?: string
+  reason?: string
+}
+
+export interface ReleaseAssetItem {
+  id: number
+  name: string
+  label: string | null
+  sizeInBytes: number
+  downloadCount: number
+  state: string
+  contentType: string
+  createdAt: string
+  updatedAt: string
+  downloadUrl: string
+  browserDownloadUrl: string
+}
+
+export interface ReleaseAssetWriteResult {
+  ok: boolean
+  id?: number
+  name?: string
+  reason?: string
+}
+
 export interface BranchCreateResult {
   ok: boolean
   name?: string
@@ -757,6 +803,74 @@ function mapTeam(raw: RawTeam): TeamItem {
     htmlUrl: raw.html_url,
     membersCount: raw.members_count ?? null,
     reposCount: raw.repos_count ?? null,
+  }
+}
+
+interface RawWebhook {
+  id: number
+  name: string
+  active: boolean
+  events: string[]
+  config: {
+    url: string
+    content_type: string
+    insecure_ssl: string | null
+  }
+  url: string
+  ping_url: string
+  deliveries_url: string
+  test_url: string
+  created_at: string
+  updated_at: string
+}
+
+interface RawReleaseAsset {
+  id: number
+  name: string
+  label: string | null
+  size_in_bytes: number
+  download_count: number
+  state: string
+  content_type: string
+  created_at: string
+  updated_at: string
+  url: string
+  browser_download_url: string
+}
+
+function mapWebhook(raw: RawWebhook): WebhookItem {
+  return {
+    id: raw.id,
+    name: raw.name,
+    active: raw.active,
+    events: raw.events,
+    config: {
+      url: raw.config.url,
+      contentType: raw.config.content_type,
+      insecureSsl: raw.config.insecure_ssl,
+    },
+    url: raw.url,
+    pingUrl: raw.ping_url,
+    deliveriesUrl: raw.deliveries_url,
+    testUrl: raw.test_url,
+    createdAt: raw.created_at,
+    updatedAt: raw.updated_at,
+  }
+}
+
+function mapReleaseAsset(raw: RawReleaseAsset): ReleaseAssetItem {
+  return {
+    id: raw.id,
+    name: raw.name,
+    label: raw.label,
+    sizeInBytes: raw.size_in_bytes,
+    downloadCount: raw.download_count,
+    state: raw.state,
+    contentType: raw.content_type,
+    createdAt: raw.created_at,
+    updatedAt: raw.updated_at,
+    downloadUrl: raw.url,
+    browserDownloadUrl: raw.browser_download_url,
   }
 }
 
@@ -1513,6 +1627,183 @@ export class GithubClient {
     } catch (error) {
       if (error instanceof GithubError && (error.status === 404 || error.status === 422)) {
         return { ok: false, username, reason: 'Could not remove team membership (team or user not found).' }
+      }
+      throw error
+    }
+  }
+
+  async listRepoWebhooks(owner: string, repo: string, options: { perPage?: number; signal?: AbortSignal } = {}): Promise<WebhookItem[]> {
+    const params = new URLSearchParams({
+      per_page: String(Math.max(1, Math.min(options.perPage ?? 20, 100))),
+    })
+    const data = await this.request<RawWebhook[]>(
+      `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/hooks?${params}`,
+      { signal: options.signal },
+    )
+    return data.map(mapWebhook)
+  }
+
+  async getRepoWebhook(owner: string, repo: string, hookId: number, signal?: AbortSignal): Promise<WebhookItem> {
+    const data = await this.request<RawWebhook>(
+      `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/hooks/${hookId}`,
+      { signal },
+    )
+    return mapWebhook(data)
+  }
+
+  async createRepoWebhook(
+    owner: string,
+    repo: string,
+    input: {
+      url: string
+      contentType: 'json' | 'form'
+      secret?: string
+      insecureSsl?: boolean
+      events?: string[]
+      active?: boolean
+    },
+    signal?: AbortSignal,
+  ): Promise<WebhookWriteResult> {
+    const config: Record<string, unknown> = { url: input.url, content_type: input.contentType }
+    if (input.secret !== undefined) config.secret = input.secret
+    if (input.insecureSsl !== undefined) config.insecure_ssl = input.insecureSsl ? '1' : '0'
+    const body: Record<string, unknown> = { name: 'web', config }
+    if (input.events !== undefined) body.events = input.events
+    if (input.active !== undefined) body.active = input.active
+    try {
+      const data = await this.request<RawWebhook>(
+        `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/hooks`,
+        { method: 'POST', body, signal },
+      )
+      return { ok: true, id: data.id, url: data.url }
+    } catch (error) {
+      if (error instanceof GithubError && (error.status === 404 || error.status === 422)) {
+        return { ok: false, reason: 'Could not create the repository webhook (not found or invalid configuration).' }
+      }
+      throw error
+    }
+  }
+
+  async updateRepoWebhook(
+    owner: string,
+    repo: string,
+    hookId: number,
+    input: {
+      url?: string
+      contentType?: 'json' | 'form'
+      secret?: string
+      insecureSsl?: boolean
+      events?: string[]
+      addEvents?: string[]
+      removeEvents?: string[]
+      active?: boolean
+    },
+    signal?: AbortSignal,
+  ): Promise<WebhookWriteResult> {
+    const body: Record<string, unknown> = {}
+    if (input.url !== undefined || input.contentType !== undefined || input.secret !== undefined || input.insecureSsl !== undefined) {
+      const config: Record<string, unknown> = {}
+      if (input.url !== undefined) config.url = input.url
+      if (input.contentType !== undefined) config.content_type = input.contentType
+      if (input.secret !== undefined) config.secret = input.secret
+      if (input.insecureSsl !== undefined) config.insecure_ssl = input.insecureSsl ? '1' : '0'
+      body.config = config
+    }
+    if (input.events !== undefined) body.events = input.events
+    if (input.addEvents !== undefined) body.add_events = input.addEvents
+    if (input.removeEvents !== undefined) body.remove_events = input.removeEvents
+    if (input.active !== undefined) body.active = input.active
+    try {
+      const data = await this.request<RawWebhook>(
+        `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/hooks/${hookId}`,
+        { method: 'PATCH', body, signal },
+      )
+      return { ok: true, id: data.id, url: data.url }
+    } catch (error) {
+      if (error instanceof GithubError && (error.status === 404 || error.status === 422)) {
+        return { ok: false, id: hookId, reason: 'Could not update the repository webhook (not found or invalid configuration).' }
+      }
+      throw error
+    }
+  }
+
+  async deleteRepoWebhook(owner: string, repo: string, hookId: number, signal?: AbortSignal): Promise<WebhookWriteResult> {
+    try {
+      await this.request<unknown>(
+        `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/hooks/${hookId}`,
+        { method: 'DELETE', signal },
+      )
+      return { ok: true, id: hookId }
+    } catch (error) {
+      if (error instanceof GithubError && (error.status === 404 || error.status === 422)) {
+        return { ok: false, id: hookId, reason: 'Could not delete the repository webhook (not found or invalid).' }
+      }
+      throw error
+    }
+  }
+
+  async pingRepoWebhook(owner: string, repo: string, hookId: number, signal?: AbortSignal): Promise<WebhookWriteResult> {
+    try {
+      await this.request<unknown>(
+        `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/hooks/${hookId}/pings`,
+        { method: 'POST', body: {}, signal },
+      )
+      return { ok: true, id: hookId }
+    } catch (error) {
+      if (error instanceof GithubError && (error.status === 404 || error.status === 422)) {
+        return { ok: false, id: hookId, reason: 'Could not ping the repository webhook (not found or invalid).' }
+      }
+      throw error
+    }
+  }
+
+  async listReleaseAssets(owner: string, repo: string, releaseId: number, options: { perPage?: number; signal?: AbortSignal } = {}): Promise<ReleaseAssetItem[]> {
+    const params = new URLSearchParams({
+      per_page: String(Math.max(1, Math.min(options.perPage ?? 30, 100))),
+    })
+    const data = await this.request<RawReleaseAsset[]>(
+      `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/releases/${releaseId}/assets?${params}`,
+      { signal: options.signal },
+    )
+    return data.map(mapReleaseAsset)
+  }
+
+  async getReleaseAsset(owner: string, repo: string, assetId: number, signal?: AbortSignal): Promise<ReleaseAssetItem> {
+    const data = await this.request<RawReleaseAsset>(
+      `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/releases/assets/${assetId}`,
+      { signal },
+    )
+    return mapReleaseAsset(data)
+  }
+
+  async updateReleaseAsset(owner: string, repo: string, assetId: number, input: { name?: string; label?: string }, signal?: AbortSignal): Promise<ReleaseAssetWriteResult> {
+    const body: Record<string, unknown> = {}
+    if (input.name !== undefined) body.name = input.name
+    if (input.label !== undefined) body.label = input.label
+    try {
+      const data = await this.request<RawReleaseAsset>(
+        `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/releases/assets/${assetId}`,
+        { method: 'PATCH', body, signal },
+      )
+      return { ok: true, id: data.id, name: data.name }
+    } catch (error) {
+      if (error instanceof GithubError && (error.status === 404 || error.status === 422)) {
+        return { ok: false, id: assetId, reason: 'Could not update the release asset (not found or invalid name).' }
+      }
+      throw error
+    }
+  }
+
+  async deleteReleaseAsset(owner: string, repo: string, assetId: number, signal?: AbortSignal): Promise<ReleaseAssetWriteResult> {
+    try {
+      await this.request<unknown>(
+        `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/releases/assets/${assetId}`,
+        { method: 'DELETE', signal },
+      )
+      return { ok: true, id: assetId }
+    } catch (error) {
+      if (error instanceof GithubError && (error.status === 404 || error.status === 422)) {
+        return { ok: false, id: assetId, reason: 'Could not delete the release asset (not found or invalid).' }
       }
       throw error
     }

@@ -86,6 +86,16 @@ npm install /path/to/dsh-tool-github
 | `github_list_team_repos` | 列出团队可访问仓库 | 是 |
 | `github_update_team_membership` | 添加团队成员或修改角色 | 是 |
 | `github_remove_team_membership` | 从组织团队移除用户 | 是 |
+| `github_list_repo_webhooks` | 列出仓库 webhook（事件、配置、投递端点） | 是 |
+| `github_get_repo_webhook` | 查看单个仓库 webhook 配置 | 是 |
+| `github_create_repo_webhook` | 创建仓库 webhook（事件、secret、内容类型、启用状态） | 是 |
+| `github_update_repo_webhook` | 更新 webhook URL、事件、secret 或启用状态 | 是 |
+| `github_delete_repo_webhook` | 删除仓库 webhook | 是 |
+| `github_ping_repo_webhook` | 向仓库 webhook 发送 ping | 是 |
+| `github_list_release_assets` | 列出 Release 资产（大小、下载次数、下载 URL） | 是 |
+| `github_get_release_asset` | 查看单个 Release 资产元信息 | 是 |
+| `github_update_release_asset` | 重命名 Release 资产或更新显示标签 | 是 |
+| `github_delete_release_asset` | 删除 Release 资产 | 是 |
 | `github_list_workflow_runs` | 查看 Actions 运行（workflow、分支、状态） | 否* |
 | `github_list_workflows` | 查看仓库 Actions workflows（名称、路径、状态） | 否* |
 | `github_get_workflow` | 查看单个 workflow 详情 | 否* |

@@ -309,7 +309,35 @@ v0.11 方向：补齐组织级治理，让 Agent 可以查看组织/团队结构
 - 组织公开信息免 token；组织/团队成员、团队与写操作需要 token，无 token 返回业务失败值；404/422 尽量映射为业务失败值。
 - 验收：typecheck ✅；140/140 单测（含 org/team 映射、PUT/DELETE body 断言、404/422、无 token、presentCall）。
 
+### 阶段 18：Repository Webhook 与 Release Assets（2026-08-25 新增）
+
+v0.12 方向：补齐仓库事件接入与 Release 产物管理，让 Agent 可以配置 webhook，并维护 Release 已上传资产。
+
+| 工具 | 功能 | 需 token | 状态 |
+|---|---|---|---|
+| `github_list_repo_webhooks` | 列出仓库 webhook（事件、配置、投递端点） | 是 | ✅ 已实现 |
+| `github_get_repo_webhook` | 查看单个仓库 webhook 配置 | 是 | ✅ 已实现 |
+| `github_create_repo_webhook` | 创建仓库 webhook（事件、secret、内容类型、启用状态） | 是 | ✅ 已实现 |
+| `github_update_repo_webhook` | 更新 webhook URL、事件、secret 或启用状态 | 是 | ✅ 已实现 |
+| `github_delete_repo_webhook` | 删除仓库 webhook | 是 | ✅ 已实现 |
+| `github_ping_repo_webhook` | 向仓库 webhook 发送 ping | 是 | ✅ 已实现 |
+| `github_list_release_assets` | 列出 Release 资产（大小、下载次数、下载 URL） | 是 | ✅ 已实现 |
+| `github_get_release_asset` | 查看单个 Release 资产元信息 | 是 | ✅ 已实现 |
+| `github_update_release_asset` | 重命名 Release 资产或更新显示标签 | 是 | ✅ 已实现 |
+| `github_delete_release_asset` | 删除 Release 资产 | 是 | ✅ 已实现 |
+
+- 所有工具均需 token：只读工具无 token 返回 `{ found: false, reason: '... token ...' }`，写工具返回 `{ ok: false, reason: '... token ...' }`；404/422 尽量映射为业务失败值。
+- create/update 支持 `contentType`、`secret`、`insecureSsl`、`events`、`active`；update 额外支持 `addEvents`/`removeEvents`，`insecureSsl` 由 boolean 转为 API 的 `"1"`/`"0"`。
+- 验收：typecheck ✅；150/150 单测（含 webhook/asset 映射、POST/PATCH/DELETE body 断言、404/422、无 token、presentCall/presentResult）。
+
 ## 5. 开发日志（每次推进后追加，带时间戳）
+
+### 2026-08-25（阶段 18：Repository Webhook 与 Release Assets 完成，共 83 个工具）
+- 新增 6 个 webhook 工具：GET/POST/PATCH/DELETE `/repos/{owner}/{repo}/hooks` 与 `/hooks/{hook_id}`，另有 ping 端点；列表/详情映射事件、config、投递与测试端点。
+- 新增 4 个 release asset 工具：GET `/repos/{owner}/{repo}/releases/{release_id}/assets` 与 `/releases/assets/{asset_id}`，支持 PATCH 改名/标签和 DELETE。
+- webhook 的 `insecure_ssl` 在 client 层由 boolean 转换为 `"1"`/`"0"`；update 支持 `add_events`/`remove_events`。
+- 测试：client +5（webhook 列表/详情映射、create/update body、delete/ping 与错误路径、release asset 列表/详情映射、update/delete 与 422），tools +5（10 工具无 token、webhook 带 token 传参、release asset 带 token 传参、404/422 业务值、presentCall/presentResult）；共 150/150 通过。
+- 验证：typecheck ✅、vitest 150/150 ✅、build ✅；README 中英文工具表同步（83 工具）。
 
 ### 2026-08-25（阶段 15：Organization / Team 管理完成，共 73 个工具）
 - 新增 `github_get_org` / `github_list_org_repos`：GET `/orgs/{org}` 与 `/orgs/{org}/repos`，公开数据免 token，仓库映射可见性、star、语言、更新时间。

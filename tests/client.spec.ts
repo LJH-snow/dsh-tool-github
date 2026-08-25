@@ -1241,3 +1241,193 @@ describe('GithubClient stage 17', () => {
     expect((await failed.removeTeamMembership('acme', 'core', 'alice')).ok).toBe(false)
   })
 })
+
+describe('GithubClient stage 18', () => {
+  it('listRepoWebhooks and getRepoWebhook map webhook data', async () => {
+    const rawWebhook = {
+      id: 12,
+      name: 'web',
+      active: true,
+      events: ['push'],
+      config: { url: 'https://example.com/hook', content_type: 'json', insecure_ssl: '1' },
+      url: 'https://api.github.com/repos/a/b/hooks/12',
+      ping_url: 'https://api.github.com/repos/a/b/hooks/12/pings',
+      deliveries_url: 'https://api.github.com/repos/a/b/hooks/12/deliveries',
+      test_url: 'https://api.github.com/repos/a/b/hooks/12/test',
+      created_at: '2026-08-25T00:00:00Z',
+      updated_at: '2026-08-25T01:00:00Z',
+    }
+    const expected = {
+      id: 12,
+      name: 'web',
+      active: true,
+      events: ['push'],
+      config: { url: 'https://example.com/hook', contentType: 'json', insecureSsl: '1' },
+      url: 'https://api.github.com/repos/a/b/hooks/12',
+      pingUrl: 'https://api.github.com/repos/a/b/hooks/12/pings',
+      deliveriesUrl: 'https://api.github.com/repos/a/b/hooks/12/deliveries',
+      testUrl: 'https://api.github.com/repos/a/b/hooks/12/test',
+      createdAt: '2026-08-25T00:00:00Z',
+      updatedAt: '2026-08-25T01:00:00Z',
+    }
+
+    const listFetch = vi.fn(async () => jsonResponse(200, [rawWebhook]))
+    const listClient = new GithubClient({ token: 'ghp_test', fetchImpl: listFetch })
+    expect(await listClient.listRepoWebhooks('a', 'b', { perPage: 50 })).toEqual([expected])
+    expect(String(listFetch.mock.calls[0][0])).toContain('/repos/a/b/hooks?')
+    expect(String(listFetch.mock.calls[0][0])).toContain('per_page=50')
+
+    const getFetch = vi.fn(async () => jsonResponse(200, rawWebhook))
+    const getClient = new GithubClient({ token: 'ghp_test', fetchImpl: getFetch })
+    expect(await getClient.getRepoWebhook('a', 'b', 12)).toEqual(expected)
+    expect(String(getFetch.mock.calls[0][0])).toContain('/repos/a/b/hooks/12')
+  })
+
+  it('repo webhook writes send the expected POST and PATCH bodies', async () => {
+    const rawWebhook = {
+      id: 12,
+      name: 'web',
+      active: true,
+      events: ['push'],
+      config: { url: 'https://example.com/hook', content_type: 'json', insecure_ssl: '1' },
+      url: 'https://api.github.com/repos/a/b/hooks/12',
+      ping_url: 'https://api.github.com/repos/a/b/hooks/12/pings',
+      deliveries_url: 'https://api.github.com/repos/a/b/hooks/12/deliveries',
+      test_url: 'https://api.github.com/repos/a/b/hooks/12/test',
+      created_at: '2026-08-25T00:00:00Z',
+      updated_at: '2026-08-25T01:00:00Z',
+    }
+
+    const createFetch = vi.fn(async () => jsonResponse(201, rawWebhook))
+    const createClient = new GithubClient({ token: 'ghp_test', fetchImpl: createFetch })
+    const created = await createClient.createRepoWebhook('a', 'b', {
+      url: 'https://example.com/hook',
+      contentType: 'form',
+      secret: 'secret',
+      insecureSsl: true,
+      events: ['push'],
+      active: false,
+    })
+    expect(created).toEqual({ ok: true, id: 12, url: 'https://api.github.com/repos/a/b/hooks/12' })
+    const [createUrl, createInit] = createFetch.mock.calls[0] as [string, RequestInit]
+    expect(createUrl).toContain('/repos/a/b/hooks')
+    expect(createInit.method).toBe('POST')
+    expect(JSON.parse(String(createInit.body))).toEqual({
+      name: 'web',
+      config: { url: 'https://example.com/hook', content_type: 'form', secret: 'secret', insecure_ssl: '1' },
+      events: ['push'],
+      active: false,
+    })
+
+    const updateFetch = vi.fn(async () => jsonResponse(200, { ...rawWebhook, url: 'https://api.github.com/repos/a/b/hooks/12' }))
+    const updateClient = new GithubClient({ token: 'ghp_test', fetchImpl: updateFetch })
+    const updated = await updateClient.updateRepoWebhook('a', 'b', 12, {
+      url: 'https://example.com/new',
+      contentType: 'json',
+      addEvents: ['issues'],
+      removeEvents: ['pull_request'],
+      active: true,
+    })
+    expect(updated).toEqual({ ok: true, id: 12, url: 'https://api.github.com/repos/a/b/hooks/12' })
+    const [, updateInit] = updateFetch.mock.calls[0] as [string, RequestInit]
+    expect(updateInit.method).toBe('PATCH')
+    expect(JSON.parse(String(updateInit.body))).toEqual({
+      config: { url: 'https://example.com/new', content_type: 'json' },
+      add_events: ['issues'],
+      remove_events: ['pull_request'],
+      active: true,
+    })
+  })
+
+  it('repo webhook delete/ping and webhook failure paths', async () => {
+    const pingFetch = vi.fn(async () => new Response(null, { status: 204 }))
+    const pingClient = new GithubClient({ token: 'ghp_test', fetchImpl: pingFetch })
+    expect(await pingClient.pingRepoWebhook('a', 'b', 12)).toEqual({ ok: true, id: 12 })
+    expect(pingFetch.mock.calls[0][1]).toMatchObject({ method: 'POST' })
+    expect(String(pingFetch.mock.calls[0][0])).toContain('/repos/a/b/hooks/12/pings')
+
+    const deleteFetch = vi.fn(async () => new Response(null, { status: 204 }))
+    const deleteClient = new GithubClient({ token: 'ghp_test', fetchImpl: deleteFetch })
+    expect(await deleteClient.deleteRepoWebhook('a', 'b', 12)).toEqual({ ok: true, id: 12 })
+    expect(deleteFetch.mock.calls[0][1]).toMatchObject({ method: 'DELETE' })
+
+    const failed = new GithubClient({ token: 'ghp_test', fetchImpl: vi.fn(async () => jsonResponse(404, {})) })
+    expect((await failed.createRepoWebhook('a', 'b', { url: 'https://example.com/hook', contentType: 'json' })).ok).toBe(false)
+    expect((await failed.updateRepoWebhook('a', 'b', 12, { url: 'https://example.com/new' })).ok).toBe(false)
+    expect((await failed.pingRepoWebhook('a', 'b', 12)).ok).toBe(false)
+    expect((await failed.deleteRepoWebhook('a', 'b', 12)).ok).toBe(false)
+  })
+
+  it('release asset reads map asset metadata', async () => {
+    const rawAsset = {
+      id: 99,
+      name: 'plugin.zip',
+      label: 'Linux binary',
+      size_in_bytes: 1234,
+      download_count: 7,
+      state: 'uploaded',
+      content_type: 'application/zip',
+      created_at: '2026-08-25T00:00:00Z',
+      updated_at: '2026-08-25T02:00:00Z',
+      url: 'https://api.github.com/repos/a/b/releases/assets/99',
+      browser_download_url: 'https://github.com/a/b/releases/download/v1/plugin.zip',
+    }
+    const expected = {
+      id: 99,
+      name: 'plugin.zip',
+      label: 'Linux binary',
+      sizeInBytes: 1234,
+      downloadCount: 7,
+      state: 'uploaded',
+      contentType: 'application/zip',
+      createdAt: '2026-08-25T00:00:00Z',
+      updatedAt: '2026-08-25T02:00:00Z',
+      downloadUrl: 'https://api.github.com/repos/a/b/releases/assets/99',
+      browserDownloadUrl: 'https://github.com/a/b/releases/download/v1/plugin.zip',
+    }
+
+    const listFetch = vi.fn(async () => jsonResponse(200, [rawAsset]))
+    const listClient = new GithubClient({ token: 'ghp_test', fetchImpl: listFetch })
+    expect(await listClient.listReleaseAssets('a', 'b', 5, { perPage: 10 })).toEqual([expected])
+    expect(String(listFetch.mock.calls[0][0])).toContain('/repos/a/b/releases/5/assets?')
+    expect(String(listFetch.mock.calls[0][0])).toContain('per_page=10')
+
+    const getFetch = vi.fn(async () => jsonResponse(200, rawAsset))
+    const getClient = new GithubClient({ token: 'ghp_test', fetchImpl: getFetch })
+    expect(await getClient.getReleaseAsset('a', 'b', 99)).toEqual(expected)
+    expect(String(getFetch.mock.calls[0][0])).toContain('/repos/a/b/releases/assets/99')
+  })
+
+  it('release asset writes send PATCH/DELETE and map failures', async () => {
+    const rawAsset = {
+      id: 99,
+      name: 'renamed.zip',
+      label: 'Renamed binary',
+      size_in_bytes: 1234,
+      download_count: 7,
+      state: 'uploaded',
+      content_type: 'application/zip',
+      created_at: '2026-08-25T00:00:00Z',
+      updated_at: '2026-08-25T02:00:00Z',
+      url: 'https://api.github.com/repos/a/b/releases/assets/99',
+      browser_download_url: 'https://github.com/a/b/releases/download/v1/renamed.zip',
+    }
+
+    const updateFetch = vi.fn(async () => jsonResponse(200, rawAsset))
+    const updateClient = new GithubClient({ token: 'ghp_test', fetchImpl: updateFetch })
+    expect(await updateClient.updateReleaseAsset('a', 'b', 99, { name: 'renamed.zip', label: 'Renamed binary' })).toEqual({ ok: true, id: 99, name: 'renamed.zip' })
+    const [, updateInit] = updateFetch.mock.calls[0] as [string, RequestInit]
+    expect(updateInit.method).toBe('PATCH')
+    expect(String(updateFetch.mock.calls[0][0])).toContain('/repos/a/b/releases/assets/99')
+    expect(JSON.parse(String(updateInit.body))).toEqual({ name: 'renamed.zip', label: 'Renamed binary' })
+
+    const deleteFetch = vi.fn(async () => new Response(null, { status: 204 }))
+    const deleteClient = new GithubClient({ token: 'ghp_test', fetchImpl: deleteFetch })
+    expect(await deleteClient.deleteReleaseAsset('a', 'b', 99)).toEqual({ ok: true, id: 99 })
+    expect(deleteFetch.mock.calls[0][1]).toMatchObject({ method: 'DELETE' })
+
+    const failed = new GithubClient({ token: 'ghp_test', fetchImpl: vi.fn(async () => jsonResponse(422, {})) })
+    expect((await failed.updateReleaseAsset('a', 'b', 99, { name: 'bad name' })).ok).toBe(false)
+    expect((await failed.deleteReleaseAsset('a', 'b', 99)).ok).toBe(false)
+  })
+})

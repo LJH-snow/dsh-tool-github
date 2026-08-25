@@ -24,12 +24,15 @@ describe('tool definitions', () => {
       'github_create_issue',
       'github_create_pr_draft',
       'github_create_release',
+      'github_create_repo_webhook',
       'github_create_repository',
       'github_delete_artifact',
       'github_delete_branch_protection',
       'github_delete_environment',
+      'github_delete_release_asset',
       'github_delete_repo_secret',
       'github_delete_repo_variable',
+      'github_delete_repo_webhook',
       'github_dispatch_workflow',
       'github_get_artifact',
       'github_get_branch_protection',
@@ -39,7 +42,9 @@ describe('tool definitions', () => {
       'github_get_org',
       'github_get_pull_request',
       'github_get_readme',
+      'github_get_release_asset',
       'github_get_repo',
+      'github_get_repo_webhook',
       'github_get_team',
       'github_get_user',
       'github_get_workflow',
@@ -58,10 +63,12 @@ describe('tool definitions', () => {
       'github_list_pr_comments',
       'github_list_prs',
       'github_list_pull_request_reviews',
+      'github_list_release_assets',
       'github_list_releases',
       'github_list_repo_artifacts',
       'github_list_repo_secrets',
       'github_list_repo_variables',
+      'github_list_repo_webhooks',
       'github_list_run_artifacts',
       'github_list_tags',
       'github_list_team_members',
@@ -70,6 +77,7 @@ describe('tool definitions', () => {
       'github_list_workflow_runs',
       'github_list_workflows',
       'github_merge_pr',
+      'github_ping_repo_webhook',
       'github_remove_team_membership',
       'github_reply_pr_comment',
       'github_request_pr_reviewers',
@@ -87,6 +95,8 @@ describe('tool definitions', () => {
       'github_unstar_repo',
       'github_update_environment',
       'github_update_issue',
+      'github_update_release_asset',
+      'github_update_repo_webhook',
       'github_update_team_membership',
       'github_write_file',
     ])
@@ -192,12 +202,15 @@ describe('extended tools (stage 5)', () => {
       'github_create_issue',
       'github_create_pr_draft',
       'github_create_release',
+      'github_create_repo_webhook',
       'github_create_repository',
       'github_delete_artifact',
       'github_delete_branch_protection',
       'github_delete_environment',
+      'github_delete_release_asset',
       'github_delete_repo_secret',
       'github_delete_repo_variable',
+      'github_delete_repo_webhook',
       'github_dispatch_workflow',
       'github_get_artifact',
       'github_get_branch_protection',
@@ -207,7 +220,9 @@ describe('extended tools (stage 5)', () => {
       'github_get_org',
       'github_get_pull_request',
       'github_get_readme',
+      'github_get_release_asset',
       'github_get_repo',
+      'github_get_repo_webhook',
       'github_get_team',
       'github_get_user',
       'github_get_workflow',
@@ -226,10 +241,12 @@ describe('extended tools (stage 5)', () => {
       'github_list_pr_comments',
       'github_list_prs',
       'github_list_pull_request_reviews',
+      'github_list_release_assets',
       'github_list_releases',
       'github_list_repo_artifacts',
       'github_list_repo_secrets',
       'github_list_repo_variables',
+      'github_list_repo_webhooks',
       'github_list_run_artifacts',
       'github_list_tags',
       'github_list_team_members',
@@ -238,6 +255,7 @@ describe('extended tools (stage 5)', () => {
       'github_list_workflow_runs',
       'github_list_workflows',
       'github_merge_pr',
+      'github_ping_repo_webhook',
       'github_remove_team_membership',
       'github_reply_pr_comment',
       'github_request_pr_reviewers',
@@ -255,6 +273,8 @@ describe('extended tools (stage 5)', () => {
       'github_unstar_repo',
       'github_update_environment',
       'github_update_issue',
+      'github_update_release_asset',
+      'github_update_repo_webhook',
       'github_update_team_membership',
       'github_write_file',
     ])
@@ -912,5 +932,139 @@ describe('stage 17 tools', () => {
     expect(defs['github_list_team_repos'].presentCall({ org: 'acme', teamSlug: 'core' })).toMatchObject({ kind: 'search' })
     expect(defs['github_update_team_membership'].presentCall({ org: 'acme', teamSlug: 'core', username: 'alice' })).toMatchObject({ kind: 'edit' })
     expect(defs['github_remove_team_membership'].presentCall({ org: 'acme', teamSlug: 'core', username: 'alice' })).toMatchObject({ kind: 'edit' })
+  })
+})
+
+describe('stage 18 tools', () => {
+  it('webhook and release asset tools require a token', async () => {
+    const noToken = Object.fromEntries(createTools(new GithubClient({ fetchImpl: vi.fn() })).map(t => [t.name, t]))
+    const cases: Array<{ name: string; args: Record<string, unknown> }> = [
+      { name: 'github_list_repo_webhooks', args: { owner: 'a', repo: 'b' } },
+      { name: 'github_get_repo_webhook', args: { owner: 'a', repo: 'b', hookId: 12 } },
+      { name: 'github_create_repo_webhook', args: { owner: 'a', repo: 'b', url: 'https://example.com/hook' } },
+      { name: 'github_update_repo_webhook', args: { owner: 'a', repo: 'b', hookId: 12, url: 'https://example.com/new' } },
+      { name: 'github_delete_repo_webhook', args: { owner: 'a', repo: 'b', hookId: 12 } },
+      { name: 'github_ping_repo_webhook', args: { owner: 'a', repo: 'b', hookId: 12 } },
+      { name: 'github_list_release_assets', args: { owner: 'a', repo: 'b', releaseId: 5 } },
+      { name: 'github_get_release_asset', args: { owner: 'a', repo: 'b', assetId: 99 } },
+      { name: 'github_update_release_asset', args: { owner: 'a', repo: 'b', assetId: 99, name: 'renamed.zip' } },
+      { name: 'github_delete_release_asset', args: { owner: 'a', repo: 'b', assetId: 99 } },
+    ]
+    for (const { name, args } of cases) {
+      const result = await noToken[name].execute(args, exec()) as Record<string, unknown>
+      expect(result.reason).toContain('token')
+      if (name.startsWith('github_list') || name.startsWith('github_get')) {
+        expect(result.found).toBe(false)
+      } else {
+        expect(result.ok).toBe(false)
+      }
+    }
+  })
+
+  it('repository webhook tools pass through with a token', async () => {
+    const rawWebhook = {
+      id: 12,
+      name: 'web',
+      active: true,
+      events: ['push'],
+      config: { url: 'https://example.com/hook', content_type: 'json', insecure_ssl: '1' },
+      url: 'https://api.github.com/repos/a/b/hooks/12',
+      ping_url: 'https://api.github.com/repos/a/b/hooks/12/pings',
+      deliveries_url: 'https://api.github.com/repos/a/b/hooks/12/deliveries',
+      test_url: 'https://api.github.com/repos/a/b/hooks/12/test',
+      created_at: '2026-08-25T00:00:00Z',
+      updated_at: '2026-08-25T01:00:00Z',
+    }
+
+    const listFetch = vi.fn(async () => jsonResponse(200, [rawWebhook]))
+    const listTool = createTools(new GithubClient({ token: 'ghp_test', fetchImpl: listFetch })).find(t => t.name === 'github_list_repo_webhooks')!
+    expect(await listTool.execute({ owner: 'a', repo: 'b', limit: 50 }, exec())).toMatchObject({ found: true, items: [{ id: 12, config: { url: 'https://example.com/hook' } }] })
+    expect(String(listFetch.mock.calls[0][0])).toContain('per_page=50')
+
+    const getTool = createTools(new GithubClient({ token: 'ghp_test', fetchImpl: vi.fn(async () => jsonResponse(200, rawWebhook)) })).find(t => t.name === 'github_get_repo_webhook')!
+    expect(await getTool.execute({ owner: 'a', repo: 'b', hookId: 12 }, exec())).toMatchObject({ found: true, id: 12, active: true })
+
+    const createFetch = vi.fn(async () => jsonResponse(201, rawWebhook))
+    const createTool = createTools(new GithubClient({ token: 'ghp_test', fetchImpl: createFetch })).find(t => t.name === 'github_create_repo_webhook')!
+    expect(await createTool.execute({
+      owner: 'a', repo: 'b', url: 'https://example.com/hook', contentType: 'form',
+      secret: 'secret', insecureSsl: true, events: ['push'], active: false,
+    }, exec())).toEqual({ ok: true, id: 12, url: 'https://api.github.com/repos/a/b/hooks/12' })
+    const [, createInit] = createFetch.mock.calls[0] as [string, RequestInit]
+    expect(JSON.parse(String(createInit.body))).toMatchObject({
+      config: { url: 'https://example.com/hook', content_type: 'form', secret: 'secret', insecure_ssl: '1' },
+      events: ['push'],
+      active: false,
+    })
+
+    const updateFetch = vi.fn(async () => jsonResponse(200, rawWebhook))
+    const updateTool = createTools(new GithubClient({ token: 'ghp_test', fetchImpl: updateFetch })).find(t => t.name === 'github_update_repo_webhook')!
+    expect(await updateTool.execute({ owner: 'a', repo: 'b', hookId: 12, url: 'https://example.com/new', addEvents: ['issues'], removeEvents: ['pull_request'], active: true }, exec())).toEqual({ ok: true, id: 12, url: 'https://api.github.com/repos/a/b/hooks/12' })
+    const [, updateInit] = updateFetch.mock.calls[0] as [string, RequestInit]
+    expect(JSON.parse(String(updateInit.body))).toEqual({ config: { url: 'https://example.com/new' }, add_events: ['issues'], remove_events: ['pull_request'], active: true })
+
+    const pingTool = createTools(new GithubClient({ token: 'ghp_test', fetchImpl: vi.fn(async () => new Response(null, { status: 204 })) })).find(t => t.name === 'github_ping_repo_webhook')!
+    expect(await pingTool.execute({ owner: 'a', repo: 'b', hookId: 12 }, exec())).toEqual({ ok: true, id: 12 })
+
+    const deleteTool = createTools(new GithubClient({ token: 'ghp_test', fetchImpl: vi.fn(async () => new Response(null, { status: 204 })) })).find(t => t.name === 'github_delete_repo_webhook')!
+    expect(await deleteTool.execute({ owner: 'a', repo: 'b', hookId: 12 }, exec())).toEqual({ ok: true, id: 12 })
+  })
+
+  it('release asset tools pass through with a token', async () => {
+    const rawAsset = {
+      id: 99,
+      name: 'plugin.zip',
+      label: 'Linux binary',
+      size_in_bytes: 1234,
+      download_count: 7,
+      state: 'uploaded',
+      content_type: 'application/zip',
+      created_at: '2026-08-25T00:00:00Z',
+      updated_at: '2026-08-25T02:00:00Z',
+      url: 'https://api.github.com/repos/a/b/releases/assets/99',
+      browser_download_url: 'https://github.com/a/b/releases/download/v1/plugin.zip',
+    }
+
+    const listFetch = vi.fn(async () => jsonResponse(200, [rawAsset]))
+    const listTool = createTools(new GithubClient({ token: 'ghp_test', fetchImpl: listFetch })).find(t => t.name === 'github_list_release_assets')!
+    expect(await listTool.execute({ owner: 'a', repo: 'b', releaseId: 5, limit: 10 }, exec())).toMatchObject({ found: true, items: [{ id: 99, name: 'plugin.zip' }] })
+    expect(String(listFetch.mock.calls[0][0])).toContain('/releases/5/assets?')
+    expect(String(listFetch.mock.calls[0][0])).toContain('per_page=10')
+
+    const getTool = createTools(new GithubClient({ token: 'ghp_test', fetchImpl: vi.fn(async () => jsonResponse(200, rawAsset)) })).find(t => t.name === 'github_get_release_asset')!
+    expect(await getTool.execute({ owner: 'a', repo: 'b', assetId: 99 }, exec())).toMatchObject({ found: true, id: 99, browserDownloadUrl: 'https://github.com/a/b/releases/download/v1/plugin.zip' })
+
+    const updateFetch = vi.fn(async () => jsonResponse(200, { ...rawAsset, name: 'renamed.zip' }))
+    const updateTool = createTools(new GithubClient({ token: 'ghp_test', fetchImpl: updateFetch })).find(t => t.name === 'github_update_release_asset')!
+    expect(await updateTool.execute({ owner: 'a', repo: 'b', assetId: 99, name: 'renamed.zip', label: 'Renamed binary' }, exec())).toEqual({ ok: true, id: 99, name: 'renamed.zip' })
+    const [, updateInit] = updateFetch.mock.calls[0] as [string, RequestInit]
+    expect(JSON.parse(String(updateInit.body))).toEqual({ name: 'renamed.zip', label: 'Renamed binary' })
+
+    const deleteTool = createTools(new GithubClient({ token: 'ghp_test', fetchImpl: vi.fn(async () => new Response(null, { status: 204 })) })).find(t => t.name === 'github_delete_release_asset')!
+    expect(await deleteTool.execute({ owner: 'a', repo: 'b', assetId: 99 }, exec())).toEqual({ ok: true, id: 99 })
+  })
+
+  it('webhook and asset reads and writes map 404 or 422 to business failure values', async () => {
+    const missing = Object.fromEntries(createTools(new GithubClient({ token: 'ghp_test', fetchImpl: vi.fn(async () => jsonResponse(404, {})) })).map(t => [t.name, t]))
+    expect(await missing['github_list_repo_webhooks'].execute({ owner: 'a', repo: 'b' }, exec())).toEqual({ found: false, items: [] })
+    expect(await missing['github_get_repo_webhook'].execute({ owner: 'a', repo: 'b', hookId: 12 }, exec())).toEqual({ found: false })
+    expect(await missing['github_list_release_assets'].execute({ owner: 'a', repo: 'b', releaseId: 5 }, exec())).toEqual({ found: false, items: [] })
+    expect(await missing['github_get_release_asset'].execute({ owner: 'a', repo: 'b', assetId: 99 }, exec())).toEqual({ found: false })
+    expect(await missing['github_update_repo_webhook'].execute({ owner: 'a', repo: 'b', hookId: 12, url: 'https://example.com/new' }, exec())).toMatchObject({ ok: false })
+    expect(await missing['github_delete_release_asset'].execute({ owner: 'a', repo: 'b', assetId: 99 }, exec())).toMatchObject({ ok: false })
+  })
+
+  it('presentCall and presentResult for stage 18 tools', () => {
+    const defs = Object.fromEntries(createTools(new GithubClient()).map(t => [t.name, t])) as any
+    expect(defs['github_list_repo_webhooks'].presentCall({ owner: 'a', repo: 'b' })).toMatchObject({ kind: 'search' })
+    expect(defs['github_list_release_assets'].presentCall({ owner: 'a', repo: 'b', releaseId: 5 })).toMatchObject({ kind: 'search' })
+    expect(defs['github_get_repo_webhook'].presentCall({ owner: 'a', repo: 'b', hookId: 12 })).toMatchObject({ kind: 'read' })
+    expect(defs['github_get_release_asset'].presentCall({ owner: 'a', repo: 'b', assetId: 99 })).toMatchObject({ kind: 'read' })
+    expect(defs['github_create_repo_webhook'].presentCall({ owner: 'a', repo: 'b', url: 'https://example.com/hook' })).toMatchObject({ kind: 'edit' })
+    expect(defs['github_update_release_asset'].presentCall({ owner: 'a', repo: 'b', assetId: 99, name: 'renamed.zip' })).toMatchObject({ kind: 'edit' })
+    expect(defs['github_delete_repo_webhook'].presentCall({ owner: 'a', repo: 'b', hookId: 12 })).toMatchObject({ kind: 'edit' })
+    expect(defs['github_list_repo_webhooks'].presentResult({ owner: 'a', repo: 'b' }, { found: false })).toMatchObject({ title: 'Webhooks not accessible' })
+    expect(defs['github_get_release_asset'].presentResult({ owner: 'a', repo: 'b', assetId: 99 }, { found: false })).toMatchObject({ title: 'Release asset not found' })
+    expect(defs['github_update_repo_webhook'].presentResult({ owner: 'a', repo: 'b', hookId: 12 }, { ok: false, reason: 'nope' })).toMatchObject({ title: 'Update webhook failed' })
   })
 })

@@ -3989,5 +3989,562 @@ export function createTools(client: GithubClient) {
         return client.removeTeamMembership(args.org as string, args.teamSlug as string, args.username as string, exec.signal)
       },
     }),
+
+    defineTool({
+      name: 'github_list_repo_webhooks',
+      description: 'List repository webhooks with active state, subscribed events, delivery URLs, and configuration metadata. Requires a token with repository admin access.',
+      parameters: {
+        owner: { type: 'string', required: true, description: 'Repository owner' },
+        repo: { type: 'string', required: true, description: 'Repository name' },
+        limit: { type: 'integer', description: 'Maximum results, 1-100 (default 20)' },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            found: { type: 'boolean', description: 'Whether webhooks can be listed' },
+            reason: { type: 'string', description: 'Explanation when webhooks are not accessible' },
+            items: { type: 'array', items: { type: 'object', additionalProperties: false, properties: {
+              id: { type: 'integer', description: 'Webhook id' },
+              name: { type: 'string', description: 'Webhook name' },
+              active: { type: 'boolean', description: 'Whether the webhook is active' },
+              events: { type: 'array', items: { type: 'string' }, description: 'Subscribed events' },
+              config: { type: 'object', additionalProperties: false, properties: {
+                url: { type: 'string', description: 'Payload URL' },
+                contentType: { type: 'string', description: 'payload content type' },
+                insecureSsl: { oneOf: [{ type: 'string' }, { type: 'null' }], description: 'Whether TLS verification is skipped' },
+              } },
+              url: { type: 'string', description: 'Webhook API URL' },
+              pingUrl: { type: 'string', description: 'Ping endpoint URL' },
+              deliveriesUrl: { type: 'string', description: 'Deliveries endpoint URL' },
+              testUrl: { type: 'string', description: 'Test endpoint URL' },
+              createdAt: { type: 'string', description: 'ISO creation timestamp' },
+              updatedAt: { type: 'string', description: 'ISO update timestamp' },
+            } } },
+          },
+        },
+        render: (_args, value) => {
+          if (!value.found) return [{ type: 'text', text: 'Repository webhooks are not accessible.' }]
+          const items = value.items ?? []
+          if (items.length === 0) return [{ type: 'text', text: 'No webhooks found.' }]
+          return [{ type: 'text', text: items.map(item => `#${item.id} ${item.config?.url ?? ''} (${item.active ? 'active' : 'inactive'}, ${(item.events ?? []).join(', ') || 'no events'})`).join('\n') }]
+        },
+      },
+      presentCall(args): ToolCallView {
+        return { card: 'generic', title: `Webhooks: ${args.owner}/${args.repo}`, kind: 'search' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { found?: boolean; items?: Array<{ id: number; config: { url: string }; active: boolean }> }
+        if (!v.found) return { card: 'generic', title: 'Webhooks not accessible' }
+        const items = v.items ?? []
+        if (items.length === 0) return { card: 'generic', title: 'No webhooks' }
+        return { card: 'generic', title: `${items.length} webhook(s)`, content: [{ type: 'text', text: items.map(i => `#${i.id} ${i.config.url} (${i.active ? 'active' : 'inactive'})`).join('\n') }] }
+      },
+      async execute(args, exec) {
+        if (!client.hasToken()) {
+          return { found: false, items: [], reason: 'Listing repository webhooks requires a GitHub token with repository admin access.' }
+        }
+        const limit = args.limit === undefined ? 20 : Math.max(1, Math.min(args.limit as number, 100))
+        try {
+          const items = await client.listRepoWebhooks(args.owner as string, args.repo as string, { perPage: limit, signal: exec.signal })
+          return { found: true, items }
+        } catch (error) {
+          if (error instanceof GithubError && error.status === 404) {
+            return { found: false, items: [] }
+          }
+          throw error
+        }
+      },
+    }),
+
+    defineTool({
+      name: 'github_get_repo_webhook',
+      description: 'Get one repository webhook and its configuration. Requires a token with repository admin access.',
+      parameters: {
+        owner: { type: 'string', required: true, description: 'Repository owner' },
+        repo: { type: 'string', required: true, description: 'Repository name' },
+        hookId: { type: 'integer', required: true, description: 'Webhook id' },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            found: { type: 'boolean', description: 'Whether the webhook exists and is accessible' },
+            id: { type: 'integer', description: 'Webhook id' },
+            name: { type: 'string', description: 'Webhook name' },
+            active: { type: 'boolean', description: 'Whether the webhook is active' },
+            events: { type: 'array', items: { type: 'string' }, description: 'Subscribed events' },
+            config: { type: 'object', additionalProperties: false, properties: {
+              url: { type: 'string', description: 'Payload URL' },
+              contentType: { type: 'string', description: 'payload content type' },
+              insecureSsl: { oneOf: [{ type: 'string' }, { type: 'null' }], description: 'Whether TLS verification is skipped' },
+            } },
+            url: { type: 'string', description: 'Webhook API URL' },
+            pingUrl: { type: 'string', description: 'Ping endpoint URL' },
+            deliveriesUrl: { type: 'string', description: 'Deliveries endpoint URL' },
+            testUrl: { type: 'string', description: 'Test endpoint URL' },
+            createdAt: { type: 'string', description: 'ISO creation timestamp' },
+            updatedAt: { type: 'string', description: 'ISO update timestamp' },
+            reason: { type: 'string', description: 'Explanation when not found' },
+          },
+        },
+        render: (_args, value) => {
+          if (!value.found) return [{ type: 'text', text: 'Webhook not found or not accessible.' }]
+          return [{
+            type: 'text',
+            text: [
+              `#${value.id} ${value.config?.url ?? ''}`,
+              `status: ${value.active ? 'active' : 'inactive'}`,
+              `events: ${(value.events ?? []).join(', ') || 'none'}`,
+              `content type: ${value.config?.contentType ?? 'n/a'}`,
+              `insecure ssl: ${value.config?.insecureSsl ?? 'n/a'}`,
+              `created: ${value.createdAt}`,
+              `updated: ${value.updatedAt}`,
+            ].join('\n'),
+          }]
+        },
+      },
+      presentCall(args): ToolCallView {
+        return { card: 'generic', title: `Webhook #${args.hookId}`, kind: 'read' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { found?: boolean; id?: number; config?: { url: string }; active?: boolean }
+        if (!v.found) return { card: 'generic', title: 'Webhook not found' }
+        return { card: 'generic', title: `Webhook #${v.id}`, content: [{ type: 'text', text: `${v.config?.url ?? ''} (${v.active ? 'active' : 'inactive'})` }] }
+      },
+      async execute(args, exec) {
+        if (!client.hasToken()) {
+          return { found: false, reason: 'Getting a repository webhook requires a GitHub token with repository admin access.' }
+        }
+        try {
+          const webhook = await client.getRepoWebhook(args.owner as string, args.repo as string, args.hookId as number, exec.signal)
+          return { found: true, ...webhook }
+        } catch (error) {
+          if (error instanceof GithubError && error.status === 404) {
+            return { found: false }
+          }
+          throw error
+        }
+      },
+    }),
+
+    defineTool({
+      name: 'github_create_repo_webhook',
+      description: 'Create a repository webhook that sends GitHub events to a payload URL. WRITE operation: requires a token with repository admin access.',
+      parameters: {
+        owner: { type: 'string', required: true, description: 'Repository owner' },
+        repo: { type: 'string', required: true, description: 'Repository name' },
+        url: { type: 'string', required: true, description: 'Payload URL to receive webhook events' },
+        contentType: { type: 'string', enum: ['json', 'form'], description: 'Payload content type (default json)' },
+        secret: { type: 'string', description: 'Webhook secret for payload verification' },
+        insecureSsl: { type: 'boolean', description: 'Skip TLS verification for the payload URL (default false)' },
+        events: { type: 'array', items: { type: 'string' }, description: 'Events to subscribe (default push)' },
+        active: { type: 'boolean', description: 'Create as active (default true)' },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            ok: { type: 'boolean', description: 'Whether the webhook was created' },
+            id: { type: 'integer', description: 'Webhook id' },
+            url: { type: 'string', description: 'Webhook API URL' },
+            reason: { type: 'string', description: 'Explanation when not created' },
+          },
+        },
+        render: (_args, value) => {
+          if (value.ok) return [{ type: 'text', text: `Created webhook #${value.id}: ${value.url}` }]
+          return [{ type: 'text', text: `Could not create webhook: ${value.reason}` }]
+        },
+      },
+      presentCall(args): ToolCallView {
+        return { card: 'generic', title: `Create webhook for ${args.owner}/${args.repo}`, kind: 'edit' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { ok?: boolean; id?: number; url?: string; reason?: string }
+        if (v.ok) return { card: 'generic', title: `Webhook #${v.id} created`, content: [{ type: 'text', text: v.url ?? '' }] }
+        return { card: 'generic', title: 'Create webhook failed', content: [{ type: 'text', text: v.reason ?? 'Unknown' }] }
+      },
+      async execute(args, exec) {
+        if (!client.hasToken()) {
+          return { ok: false, reason: 'Creating a repository webhook requires a GitHub token with repository admin access.' }
+        }
+        return client.createRepoWebhook(args.owner as string, args.repo as string, {
+          url: args.url as string,
+          contentType: (args.contentType as 'json' | 'form' | undefined) ?? 'json',
+          secret: args.secret as string | undefined,
+          insecureSsl: args.insecureSsl as boolean | undefined,
+          events: args.events as string[] | undefined,
+          active: args.active as boolean | undefined,
+        }, exec.signal)
+      },
+    }),
+
+    defineTool({
+      name: 'github_update_repo_webhook',
+      description: 'Update a repository webhook URL, events, active state, or payload security settings. WRITE operation: requires a token with repository admin access.',
+      parameters: {
+        owner: { type: 'string', required: true, description: 'Repository owner' },
+        repo: { type: 'string', required: true, description: 'Repository name' },
+        hookId: { type: 'integer', required: true, description: 'Webhook id' },
+        url: { type: 'string', description: 'New payload URL' },
+        contentType: { type: 'string', enum: ['json', 'form'], description: 'Payload content type' },
+        secret: { type: 'string', description: 'New webhook secret' },
+        insecureSsl: { type: 'boolean', description: 'Skip TLS verification for the payload URL' },
+        events: { type: 'array', items: { type: 'string' }, description: 'Complete event list to replace' },
+        addEvents: { type: 'array', items: { type: 'string' }, description: 'Events to add' },
+        removeEvents: { type: 'array', items: { type: 'string' }, description: 'Events to remove' },
+        active: { type: 'boolean', description: 'Whether the webhook is active' },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            ok: { type: 'boolean', description: 'Whether the webhook was updated' },
+            id: { type: 'integer', description: 'Webhook id' },
+            url: { type: 'string', description: 'Webhook API URL' },
+            reason: { type: 'string', description: 'Explanation when not updated' },
+          },
+        },
+        render: (_args, value) => {
+          if (value.ok) return [{ type: 'text', text: `Updated webhook #${value.id}: ${value.url}` }]
+          return [{ type: 'text', text: `Could not update webhook #${value.id}: ${value.reason}` }]
+        },
+      },
+      presentCall(args): ToolCallView {
+        return { card: 'generic', title: `Update webhook #${args.hookId}`, kind: 'edit' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { ok?: boolean; id?: number; url?: string; reason?: string }
+        if (v.ok) return { card: 'generic', title: `Webhook #${v.id} updated`, content: [{ type: 'text', text: v.url ?? '' }] }
+        return { card: 'generic', title: 'Update webhook failed', content: [{ type: 'text', text: v.reason ?? 'Unknown' }] }
+      },
+      async execute(args, exec) {
+        if (!client.hasToken()) {
+          return { ok: false, id: args.hookId as number, reason: 'Updating a repository webhook requires a GitHub token with repository admin access.' }
+        }
+        return client.updateRepoWebhook(args.owner as string, args.repo as string, args.hookId as number, {
+          url: args.url as string | undefined,
+          contentType: args.contentType as 'json' | 'form' | undefined,
+          secret: args.secret as string | undefined,
+          insecureSsl: args.insecureSsl as boolean | undefined,
+          events: args.events as string[] | undefined,
+          addEvents: args.addEvents as string[] | undefined,
+          removeEvents: args.removeEvents as string[] | undefined,
+          active: args.active as boolean | undefined,
+        }, exec.signal)
+      },
+    }),
+
+    defineTool({
+      name: 'github_delete_repo_webhook',
+      description: 'Delete a repository webhook. WRITE operation: requires a token with repository admin access.',
+      parameters: {
+        owner: { type: 'string', required: true, description: 'Repository owner' },
+        repo: { type: 'string', required: true, description: 'Repository name' },
+        hookId: { type: 'integer', required: true, description: 'Webhook id' },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            ok: { type: 'boolean', description: 'Whether the webhook was deleted' },
+            id: { type: 'integer', description: 'Webhook id' },
+            reason: { type: 'string', description: 'Explanation when not deleted' },
+          },
+        },
+        render: (_args, value) => {
+          if (value.ok) return [{ type: 'text', text: `Deleted webhook #${value.id}` }]
+          return [{ type: 'text', text: `Could not delete webhook #${value.id}: ${value.reason}` }]
+        },
+      },
+      presentCall(args): ToolCallView {
+        return { card: 'generic', title: `Delete webhook #${args.hookId}`, kind: 'edit' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { ok?: boolean; id?: number; reason?: string }
+        if (v.ok) return { card: 'generic', title: `Webhook #${v.id} deleted` }
+        return { card: 'generic', title: 'Delete webhook failed', content: [{ type: 'text', text: v.reason ?? 'Unknown' }] }
+      },
+      async execute(args, exec) {
+        if (!client.hasToken()) {
+          return { ok: false, id: args.hookId as number, reason: 'Deleting a repository webhook requires a GitHub token with repository admin access.' }
+        }
+        return client.deleteRepoWebhook(args.owner as string, args.repo as string, args.hookId as number, exec.signal)
+      },
+    }),
+
+    defineTool({
+      name: 'github_ping_repo_webhook',
+      description: 'Send a ping event to a repository webhook to verify it is receiving payloads. WRITE operation: requires a token with repository admin access.',
+      parameters: {
+        owner: { type: 'string', required: true, description: 'Repository owner' },
+        repo: { type: 'string', required: true, description: 'Repository name' },
+        hookId: { type: 'integer', required: true, description: 'Webhook id' },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            ok: { type: 'boolean', description: 'Whether the ping was sent' },
+            id: { type: 'integer', description: 'Webhook id' },
+            reason: { type: 'string', description: 'Explanation when ping could not be sent' },
+          },
+        },
+        render: (_args, value) => {
+          if (value.ok) return [{ type: 'text', text: `Pinged webhook #${value.id}` }]
+          return [{ type: 'text', text: `Could not ping webhook #${value.id}: ${value.reason}` }]
+        },
+      },
+      presentCall(args): ToolCallView {
+        return { card: 'generic', title: `Ping webhook #${args.hookId}`, kind: 'edit' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { ok?: boolean; id?: number; reason?: string }
+        if (v.ok) return { card: 'generic', title: `Webhook #${v.id} pinged` }
+        return { card: 'generic', title: 'Ping webhook failed', content: [{ type: 'text', text: v.reason ?? 'Unknown' }] }
+      },
+      async execute(args, exec) {
+        if (!client.hasToken()) {
+          return { ok: false, id: args.hookId as number, reason: 'Pinging a repository webhook requires a GitHub token with repository admin access.' }
+        }
+        return client.pingRepoWebhook(args.owner as string, args.repo as string, args.hookId as number, exec.signal)
+      },
+    }),
+
+    defineTool({
+      name: 'github_list_release_assets',
+      description: 'List assets attached to a GitHub Release, including file size, download count, state, content type, and download URLs. Requires a token for private repos.',
+      parameters: {
+        owner: { type: 'string', required: true, description: 'Repository owner' },
+        repo: { type: 'string', required: true, description: 'Repository name' },
+        releaseId: { type: 'integer', required: true, description: 'Release id' },
+        limit: { type: 'integer', description: 'Maximum results, 1-100 (default 30)' },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            found: { type: 'boolean', description: 'Whether the release assets are accessible' },
+            reason: { type: 'string', description: 'Explanation when assets are not accessible' },
+            items: {
+              type: 'array',
+              items: {
+                type: 'object',
+                additionalProperties: false,
+                properties: {
+                  id: { type: 'integer', description: 'Asset id' },
+                  name: { type: 'string', description: 'Asset file name' },
+                  label: { oneOf: [{ type: 'string' }, { type: 'null' }], description: 'Optional display label' },
+                  sizeInBytes: { type: 'integer', description: 'File size in bytes' },
+                  downloadCount: { type: 'integer', description: 'Download count' },
+                  state: { type: 'string', description: 'Asset state' },
+                  contentType: { type: 'string', description: 'Content type' },
+                  createdAt: { type: 'string', description: 'ISO upload timestamp' },
+                  updatedAt: { type: 'string', description: 'ISO update timestamp' },
+                  downloadUrl: { type: 'string', description: 'Asset API URL' },
+                  browserDownloadUrl: { type: 'string', description: 'Browser download URL' },
+                },
+              },
+            },
+          },
+        },
+        render: (_args, value) => {
+          if (!value.found) return [{ type: 'text', text: 'Release assets are not accessible.' }]
+          const items = value.items ?? []
+          if (items.length === 0) return [{ type: 'text', text: 'No release assets found.' }]
+          return [{ type: 'text', text: items.map(item => `${item.name} (${item.sizeInBytes} bytes, ${item.downloadCount} downloads, ${item.state}, ${item.contentType})`).join('\n') }]
+        },
+      },
+      presentCall(args): ToolCallView {
+        return { card: 'generic', title: `Release assets: ${args.owner}/${args.repo} #${args.releaseId}`, kind: 'search' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { found?: boolean; items?: Array<{ name: string }> }
+        if (!v.found) return { card: 'generic', title: 'Release assets not accessible' }
+        const items = v.items ?? []
+        if (items.length === 0) return { card: 'generic', title: 'No release assets' }
+        return {
+          card: 'generic',
+          title: `${items.length} release asset(s)`,
+          content: [{ type: 'text', text: items.map(i => i.name).join('\n') }],
+        }
+      },
+      async execute(args, exec) {
+        if (!client.hasToken()) {
+          return { found: false, items: [], reason: 'Listing release assets requires a GitHub token. Configure the plugin with a token.' }
+        }
+        const limit = args.limit === undefined ? 30 : Math.max(1, Math.min(args.limit as number, 100))
+        try {
+          const items = await client.listReleaseAssets(args.owner as string, args.repo as string, args.releaseId as number, { perPage: limit, signal: exec.signal })
+          return { found: true, items }
+        } catch (error) {
+          if (error instanceof GithubError && error.status === 404) {
+            return { found: false, items: [] }
+          }
+          throw error
+        }
+      },
+    }),
+
+    defineTool({
+      name: 'github_get_release_asset',
+      description: 'Get metadata for one GitHub Release asset, including size, download count, state, content type, and URLs. Requires a token for private repos.',
+      parameters: {
+        owner: { type: 'string', required: true, description: 'Repository owner' },
+        repo: { type: 'string', required: true, description: 'Repository name' },
+        assetId: { type: 'integer', required: true, description: 'Release asset id' },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            found: { type: 'boolean', description: 'Whether the asset exists and is accessible' },
+            id: { type: 'integer', description: 'Asset id' },
+            name: { type: 'string', description: 'Asset file name' },
+            label: { oneOf: [{ type: 'string' }, { type: 'null' }], description: 'Optional display label' },
+            sizeInBytes: { type: 'integer', description: 'File size in bytes' },
+            downloadCount: { type: 'integer', description: 'Download count' },
+            state: { type: 'string', description: 'Asset state' },
+            contentType: { type: 'string', description: 'Content type' },
+            createdAt: { type: 'string', description: 'ISO upload timestamp' },
+            updatedAt: { type: 'string', description: 'ISO update timestamp' },
+            downloadUrl: { type: 'string', description: 'Asset API URL' },
+            browserDownloadUrl: { type: 'string', description: 'Browser download URL' },
+            reason: { type: 'string', description: 'Explanation when not found' },
+          },
+        },
+        render: (_args, value) => {
+          if (!value.found) return [{ type: 'text', text: 'Release asset not found or not accessible.' }]
+          return [{
+            type: 'text',
+            text: [
+              `#${value.id} ${value.name}`,
+              `size: ${value.sizeInBytes} bytes`,
+              `downloads: ${value.downloadCount}`,
+              `state: ${value.state}`,
+              `content type: ${value.contentType}`,
+              `label: ${value.label ?? 'none'}`,
+              `download: ${value.browserDownloadUrl}`,
+              `created: ${value.createdAt}`,
+              `updated: ${value.updatedAt}`,
+            ].join('\n'),
+          }]
+        },
+      },
+      presentCall(args): ToolCallView {
+        return { card: 'generic', title: `Release asset #${args.assetId}`, kind: 'read' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { found?: boolean; id?: number; name?: string }
+        if (!v.found) return { card: 'generic', title: 'Release asset not found' }
+        return { card: 'generic', title: `Release asset #${v.id}`, content: [{ type: 'text', text: v.name ?? '' }] }
+      },
+      async execute(args, exec) {
+        if (!client.hasToken()) {
+          return { found: false, reason: 'Getting a release asset requires a GitHub token. Configure the plugin with a token.' }
+        }
+        try {
+          const asset = await client.getReleaseAsset(args.owner as string, args.repo as string, args.assetId as number, exec.signal)
+          return { found: true, ...asset }
+        } catch (error) {
+          if (error instanceof GithubError && error.status === 404) {
+            return { found: false }
+          }
+          throw error
+        }
+      },
+    }),
+
+    defineTool({
+      name: 'github_update_release_asset',
+      description: 'Update the file name or display label of a GitHub Release asset. WRITE operation: requires a token with repository contents access.',
+      parameters: {
+        owner: { type: 'string', required: true, description: 'Repository owner' },
+        repo: { type: 'string', required: true, description: 'Repository name' },
+        assetId: { type: 'integer', required: true, description: 'Release asset id' },
+        name: { type: 'string', description: 'New asset file name' },
+        label: { type: 'string', description: 'New display label' },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            ok: { type: 'boolean', description: 'Whether the asset was updated' },
+            id: { type: 'integer', description: 'Asset id' },
+            name: { type: 'string', description: 'Updated asset name' },
+            reason: { type: 'string', description: 'Explanation when not updated' },
+          },
+        },
+        render: (_args, value) => {
+          if (value.ok) return [{ type: 'text', text: `Updated release asset #${value.id}: ${value.name}` }]
+          return [{ type: 'text', text: `Could not update release asset #${value.id}: ${value.reason}` }]
+        },
+      },
+      presentCall(args): ToolCallView {
+        return { card: 'generic', title: `Update release asset #${args.assetId}`, kind: 'edit' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { ok?: boolean; id?: number; name?: string; reason?: string }
+        if (v.ok) return { card: 'generic', title: `Release asset #${v.id} updated`, content: [{ type: 'text', text: v.name ?? '' }] }
+        return { card: 'generic', title: 'Update release asset failed', content: [{ type: 'text', text: v.reason ?? 'Unknown' }] }
+      },
+      async execute(args, exec) {
+        if (!client.hasToken()) {
+          return { ok: false, id: args.assetId as number, reason: 'Updating a release asset requires a GitHub token. Configure the plugin with a token.' }
+        }
+        return client.updateReleaseAsset(args.owner as string, args.repo as string, args.assetId as number, {
+          name: args.name as string | undefined,
+          label: args.label as string | undefined,
+        }, exec.signal)
+      },
+    }),
+
+    defineTool({
+      name: 'github_delete_release_asset',
+      description: 'Delete a GitHub Release asset. WRITE operation: requires a token with repository contents access.',
+      parameters: {
+        owner: { type: 'string', required: true, description: 'Repository owner' },
+        repo: { type: 'string', required: true, description: 'Repository name' },
+        assetId: { type: 'integer', required: true, description: 'Release asset id' },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            ok: { type: 'boolean', description: 'Whether the asset was deleted' },
+            id: { type: 'integer', description: 'Asset id' },
+            reason: { type: 'string', description: 'Explanation when not deleted' },
+          },
+        },
+        render: (_args, value) => {
+          if (value.ok) return [{ type: 'text', text: `Deleted release asset #${value.id}` }]
+          return [{ type: 'text', text: `Could not delete release asset #${value.id}: ${value.reason}` }]
+        },
+      },
+      presentCall(args): ToolCallView {
+        return { card: 'generic', title: `Delete release asset #${args.assetId}`, kind: 'edit' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { ok?: boolean; id?: number; reason?: string }
+        if (v.ok) return { card: 'generic', title: `Release asset #${v.id} deleted` }
+        return { card: 'generic', title: 'Delete release asset failed', content: [{ type: 'text', text: v.reason ?? 'Unknown' }] }
+      },
+      async execute(args, exec) {
+        if (!client.hasToken()) {
+          return { ok: false, id: args.assetId as number, reason: 'Deleting a release asset requires a GitHub token. Configure the plugin with a token.' }
+        }
+        return client.deleteReleaseAsset(args.owner as string, args.repo as string, args.assetId as number, exec.signal)
+      },
+    }),
   ]
 }
