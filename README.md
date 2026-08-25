@@ -86,6 +86,10 @@ Full example: [examples/cordis.yml](examples/cordis.yml).
 | `github_star_repo` | Star a repository | yes |
 | `github_unstar_repo` | Remove a star | yes |
 | `github_create_release` | Create a release for a tag | yes |
+| `github_create_repository` | Create a user or organization repository | yes |
+| `github_set_repo_topics` | Set the complete topic list for a repository | yes |
+| `github_list_gists` | List user or public gists | no |
+| `github_create_gist` | Create a public or secret gist | yes |
 | `github_create_pr_draft` | Create a draft PR (head/base/title/body) | yes |
 
 ### Behavior contract (per the official execute contract)

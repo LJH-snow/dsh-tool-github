@@ -239,10 +239,10 @@ v0.8 方向：从「查看/重跑/取消 CI」继续推进到「能主动触发 
 | 工具 | 功能 | 需 token | 状态 |
 |---|---|---|---|
 | `github_dispatch_workflow` | 触发 workflow_dispatch（ref + 字符串 inputs） | 是 | ✅ 已实现 |
-| `github_create_repository` | 创建用户或组织仓库 | 是 | ⏳ 规划 |
-| `github_set_repo_topics` | 覆盖仓库 topics | 是 | ⏳ 规划 |
-| `github_list_gists` | 列出当前用户/公开 gist | 否 | ⏳ 规划 |
-| `github_create_gist` | 创建 gist | 是 | ⏳ 规划 |
+| `github_create_repository` | 创建用户或组织仓库 | 是 | ✅ 已实现 |
+| `github_set_repo_topics` | 覆盖仓库 topics | 是 | ✅ 已实现 |
+| `github_list_gists` | 列出当前用户/公开 gist | 否 | ✅ 已实现 |
+| `github_create_gist` | 创建 gist | 是 | ✅ 已实现 |
 | `github_list_repo_variables` | 列出 Actions 仓库 variables | 是 | ⏳ 规划 |
 | `github_set_repo_variable` | 创建或更新 Actions 仓库 variable | 是 | ⏳ 规划 |
 | `github_delete_repo_variable` | 删除 Actions 仓库 variable | 是 | ⏳ 规划 |
@@ -254,7 +254,7 @@ v0.8 方向：从「查看/重跑/取消 CI」继续推进到「能主动触发 
 
 安全设计：所有写工具无 token 时返回 `{ ok: false, reason: '... token ...' }` 业务值；404/409/422 尽量映射为业务失败值；401/403 仍抛基础设施错误。
 
-- 验收（阶段 12 进行中）：typecheck ✅；90/90 单测（含 204 dispatch、inputs 映射、无 token、presentCall）。
+- 验收（阶段 12 进行中）：typecheck ✅；99/99 单测（含 204 dispatch、inputs 映射、仓库/gist 错误路径、无 token、presentCall）。
 
 ## 5. 开发日志（每次推进后追加，带时间戳）
 
@@ -262,6 +262,15 @@ v0.8 方向：从「查看/重跑/取消 CI」继续推进到「能主动触发 
 - 新增 `github_dispatch_workflow`：POST `actions/workflows/{id}/dispatches`，支持 `ref` 和字符串 inputs；inputs 在工具层使用 `name/value` 数组呈现，客户端转为 GitHub API 的 `{ inputs: { name: value } }` 对象；204 空响应兼容；404/422 → 业务失败值。
 - 测试：client +2（dispatch body、空 inputs 与 422），tools +2（无 token、带 token 映射、presentCall）；共 90/90 通过。
 - 验证：typecheck ✅、vitest 90/90 ✅；README 中英文工具表同步。
+
+### 2026-08-25（阶段 12 仓库协作工具完成，共 42 个工具）
+- 新增 `github_create_repository`：POST `/user/repos` 或 `/orgs/{owner}/repos`，支持 description/private/auto_init；404/409/422 → 业务失败值。
+- 新增 `github_set_repo_topics`：PUT `/repos/{owner}/{repo}/topics`，覆盖式设置完整 topics。
+- 新增 `github_list_gists`：GET `/gists`，映射 id/description/files/owner/public/时间/URL。
+- 新增 `github_create_gist`：POST `/gists`，工具层用 `files[]`（filename/content）呈现，客户端转为 GitHub API 的 `files: { name: { content } }`。
+- 无 token 守卫覆盖 3 个写工具；空 topics/空 files 返回业务失败值。
+- 测试：client +5（user/org 仓库、topics、gist 列表、gist 创建与 422），tools +4（只读 gist、无 token/空输入、写工具传参、presentCall）；共 99/99 通过。
+- 验证：typecheck ✅、vitest 99/99 ✅、build ✅；README 中英文工具表同步（42 工具）。
 
 ### 2026-08-25（阶段 11：Actions 运维与 PR 评审闭环完成，共 37 个工具）
 - 新增 7 个 Actions 工具：

@@ -626,3 +626,62 @@ describe('GithubClient stage 12', () => {
     expect((await failed.dispatchWorkflow('a', 'b', 7, { ref: 'nope' })).ok).toBe(false)
   })
 })
+
+describe('GithubClient stage 13', () => {
+  it('createRepository posts to the user repos endpoint and maps 422', async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse(201, { full_name: 'alice/new-repo', html_url: 'https://github.com/alice/new-repo' }))
+    const client = new GithubClient({ token: 'ghp_test', fetchImpl })
+    const result = await client.createRepository({ name: 'new-repo', description: 'tools', privateRepo: true, autoInit: true })
+    const [url, init] = fetchImpl.mock.calls[0] as [string, RequestInit]
+    expect(url).toContain('/user/repos')
+    expect(init.method).toBe('POST')
+    expect(JSON.parse(String(init.body))).toEqual({ name: 'new-repo', description: 'tools', private: true, auto_init: true })
+    expect(result).toEqual({ ok: true, fullName: 'alice/new-repo', url: 'https://github.com/alice/new-repo' })
+
+    const failed = new GithubClient({ token: 'ghp_test', fetchImpl: vi.fn(async () => jsonResponse(422, {})) })
+    expect((await failed.createRepository({ name: 'dup' })).ok).toBe(false)
+  })
+
+  it('createRepository routes org repos to the org endpoint', async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse(201, { full_name: 'acme/tools', html_url: 'https://github.com/acme/tools' }))
+    const client = new GithubClient({ token: 'ghp_test', fetchImpl })
+    await client.createRepository({ owner: 'acme', name: 'tools' })
+    const [url] = fetchImpl.mock.calls[0] as [string]
+    expect(url).toContain('/orgs/acme/repos')
+  })
+
+  it('setRepoTopic PUTs the complete topic list', async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse(200, { names: ['agent', 'github'] }))
+    const client = new GithubClient({ token: 'ghp_test', fetchImpl })
+    const result = await client.setRepoTopic('a', 'b', ['agent', 'github'])
+    const [url, init] = fetchImpl.mock.calls[0] as [string, RequestInit]
+    expect(url).toContain('/repos/a/b/topics')
+    expect(init.method).toBe('PUT')
+    expect(JSON.parse(String(init.body))).toEqual({ names: ['agent', 'github'] })
+    expect(result).toEqual({ ok: true, names: ['agent', 'github'] })
+  })
+
+  it('listGists maps files, owner, and timestamps', async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse(200, [
+      { id: 'abc', description: 'notes', files: { 'a.txt': {}, 'b.md': {} }, owner: { login: 'alice' }, public: true, created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-02T00:00:00Z', html_url: 'https://gist.github.com/alice/abc' },
+    ]))
+    const client = new GithubClient({ fetchImpl })
+    const result = await client.listGists({ perPage: 5 })
+    const [url] = fetchImpl.mock.calls[0] as [string]
+    expect(url).toContain('/gists?')
+    expect(url).toContain('per_page=5')
+    expect(result[0]).toMatchObject({ id: 'abc', files: ['a.txt', 'b.md'], owner: 'alice', public: true, url: 'https://gist.github.com/alice/abc' })
+  })
+
+  it('createGist builds the files object and maps 422', async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse(201, { id: 'xyz', html_url: 'https://gist.github.com/alice/xyz' }))
+    const client = new GithubClient({ token: 'ghp_test', fetchImpl })
+    const result = await client.createGist({ description: 'snippet', publicGist: true, files: [{ filename: 'hello.txt', content: 'hello' }] })
+    const [, init] = fetchImpl.mock.calls[0] as [string, RequestInit]
+    expect(JSON.parse(String(init.body))).toEqual({ description: 'snippet', public: true, files: { 'hello.txt': { content: 'hello' } } })
+    expect(result).toEqual({ ok: true, id: 'xyz', url: 'https://gist.github.com/alice/xyz' })
+
+    const failed = new GithubClient({ token: 'ghp_test', fetchImpl: vi.fn(async () => jsonResponse(422, {})) })
+    expect((await failed.createGist({ files: [{ filename: 'x', content: 'y' }] })).ok).toBe(false)
+  })
+})

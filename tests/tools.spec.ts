@@ -19,9 +19,11 @@ describe('tool definitions', () => {
       'github_cancel_workflow_run',
       'github_comment_issue',
       'github_create_branch',
+      'github_create_gist',
       'github_create_issue',
       'github_create_pr_draft',
       'github_create_release',
+      'github_create_repository',
       'github_dispatch_workflow',
       'github_get_file',
       'github_get_issue',
@@ -34,6 +36,7 @@ describe('tool definitions', () => {
       'github_get_workflow_run_logs',
       'github_list_branches',
       'github_list_commits',
+      'github_list_gists',
       'github_list_issue_comments',
       'github_list_issues',
       'github_list_pr_comments',
@@ -49,6 +52,7 @@ describe('tool definitions', () => {
       'github_rerun_workflow_run',
       'github_search_code',
       'github_search_repos',
+      'github_set_repo_topics',
       'github_star_repo',
       'github_submit_pr_review',
       'github_unstar_repo',
@@ -152,9 +156,11 @@ describe('extended tools (stage 5)', () => {
       'github_cancel_workflow_run',
       'github_comment_issue',
       'github_create_branch',
+      'github_create_gist',
       'github_create_issue',
       'github_create_pr_draft',
       'github_create_release',
+      'github_create_repository',
       'github_dispatch_workflow',
       'github_get_file',
       'github_get_issue',
@@ -167,6 +173,7 @@ describe('extended tools (stage 5)', () => {
       'github_get_workflow_run_logs',
       'github_list_branches',
       'github_list_commits',
+      'github_list_gists',
       'github_list_issue_comments',
       'github_list_issues',
       'github_list_pr_comments',
@@ -182,6 +189,7 @@ describe('extended tools (stage 5)', () => {
       'github_rerun_workflow_run',
       'github_search_code',
       'github_search_repos',
+      'github_set_repo_topics',
       'github_star_repo',
       'github_submit_pr_review',
       'github_unstar_repo',
@@ -466,5 +474,54 @@ describe('stage 12 tools', () => {
   it('presentCall for github_dispatch_workflow', () => {
     const defs = Object.fromEntries(createTools(new GithubClient()).map(t => [t.name, t])) as any
     expect(defs['github_dispatch_workflow'].presentCall({ owner: 'a', repo: 'b', workflowId: 1, ref: 'main' })).toMatchObject({ kind: 'edit' })
+  })
+})
+
+describe('stage 13 tools', () => {
+  it('read-only github_list_gists works without a token', async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse(200, []))
+    const tool = createTools(new GithubClient({ fetchImpl })).find(t => t.name === 'github_list_gists')!
+    expect(await tool.execute({ limit: 3 }, exec())).toEqual({ items: [] })
+    const [url] = fetchImpl.mock.calls[0] as [string]
+    expect(url).toContain('per_page=3')
+  })
+
+  it('write tools require a token and validate required inputs', async () => {
+    const noToken = Object.fromEntries(createTools(new GithubClient({ fetchImpl: vi.fn() })).map(t => [t.name, t]))
+    const cases: Array<{ name: string; args: Record<string, unknown> }> = [
+      { name: 'github_create_repository', args: { name: 'tools' } },
+      { name: 'github_set_repo_topics', args: { owner: 'a', repo: 'b', topics: ['agent'] } },
+      { name: 'github_create_gist', args: { files: [{ filename: 'x', content: 'y' }] } },
+    ]
+    for (const { name, args } of cases) {
+      expect(await noToken[name].execute(args, exec())).toMatchObject({ ok: false, reason: expect.stringContaining('token') })
+    }
+
+    const fetchImpl = vi.fn(async () => jsonResponse(200, { names: ['agent'] }))
+    const tokenTools = Object.fromEntries(createTools(new GithubClient({ token: 'ghp_test', fetchImpl })).map(t => [t.name, t]))
+    expect(await tokenTools['github_set_repo_topics'].execute({ owner: 'a', repo: 'b', topics: [] }, exec())).toMatchObject({ ok: false })
+    expect(await tokenTools['github_create_gist'].execute({ files: [] }, exec())).toMatchObject({ ok: false })
+  })
+
+  it('write tools pass through with a token', async () => {
+    const repoFetch = vi.fn(async () => jsonResponse(201, { full_name: 'alice/tools', html_url: 'https://github.com/alice/tools' }))
+    const repoTool = createTools(new GithubClient({ token: 'ghp_test', fetchImpl: repoFetch })).find(t => t.name === 'github_create_repository')!
+    expect(await repoTool.execute({ owner: 'alice', name: 'tools', privateRepo: true }, exec())).toMatchObject({ ok: true, fullName: 'alice/tools' })
+    const [repoUrl] = repoFetch.mock.calls[0] as [string]
+    expect(repoUrl).toContain('/orgs/alice/repos')
+
+    const gistFetch = vi.fn(async () => jsonResponse(201, { id: 'xyz', html_url: 'https://gist.github.com/alice/xyz' }))
+    const gistTool = createTools(new GithubClient({ token: 'ghp_test', fetchImpl: gistFetch })).find(t => t.name === 'github_create_gist')!
+    expect(await gistTool.execute({ description: 'snippet', files: [{ filename: 'a.txt', content: 'hello' }] }, exec())).toMatchObject({ ok: true, id: 'xyz' })
+    const [, gistInit] = gistFetch.mock.calls[0] as [string, RequestInit]
+    expect(JSON.parse(String(gistInit.body))).toMatchObject({ files: { 'a.txt': { content: 'hello' } } })
+  })
+
+  it('presentCall for stage 13 tools', () => {
+    const defs = Object.fromEntries(createTools(new GithubClient()).map(t => [t.name, t])) as any
+    expect(defs['github_create_repository'].presentCall({ name: 'tools' })).toMatchObject({ kind: 'edit' })
+    expect(defs['github_set_repo_topics'].presentCall({ owner: 'a', repo: 'b', topics: ['agent'] })).toMatchObject({ kind: 'edit' })
+    expect(defs['github_list_gists'].presentCall({})).toMatchObject({ kind: 'search' })
+    expect(defs['github_create_gist'].presentCall({ files: [{ filename: 'a', content: 'b' }] })).toMatchObject({ kind: 'edit' })
   })
 })

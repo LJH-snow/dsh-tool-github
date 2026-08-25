@@ -29,6 +29,37 @@ export interface RepoSearchItem {
   url: string
 }
 
+export interface RepositoryCreateResult {
+  ok: boolean
+  fullName?: string
+  url?: string
+  reason?: string
+}
+
+export interface RepoTopicResult {
+  ok: boolean
+  names?: string[]
+  reason?: string
+}
+
+export interface GistItem {
+  id: string
+  description: string
+  files: string[]
+  owner: string | null
+  public: boolean
+  createdAt: string
+  updatedAt: string
+  url: string
+}
+
+export interface GistCreateResult {
+  ok: boolean
+  id?: string
+  url?: string
+  reason?: string
+}
+
 export interface IssueItem {
   number: number
   title: string
@@ -919,6 +950,91 @@ export class GithubClient {
     } catch (error) {
       if (error instanceof GithubError && error.status === 422) {
         return { ok: false, reason: 'Validation failed (e.g. the tag does not exist or the release already exists).' }
+      }
+      throw error
+    }
+  }
+
+  async createRepository(input: { owner?: string; name: string; description?: string; privateRepo?: boolean; autoInit?: boolean }, signal?: AbortSignal): Promise<RepositoryCreateResult> {
+    const path = input.owner ? `/orgs/${encodeURIComponent(input.owner)}/repos` : '/user/repos'
+    try {
+      const data = await this.request<{ full_name: string; html_url: string }>(path, {
+        method: 'POST',
+        body: {
+          name: input.name,
+          description: input.description ?? '',
+          private: input.privateRepo ?? false,
+          auto_init: input.autoInit ?? false,
+        },
+        signal,
+      })
+      return { ok: true, fullName: data.full_name, url: data.html_url }
+    } catch (error) {
+      if (error instanceof GithubError && (error.status === 404 || error.status === 409 || error.status === 422)) {
+        return { ok: false, reason: 'Could not create the repository (missing owner, duplicate name, or invalid settings).' }
+      }
+      throw error
+    }
+  }
+
+  async setRepoTopic(owner: string, repo: string, names: string[], signal?: AbortSignal): Promise<RepoTopicResult> {
+    try {
+      const data = await this.request<{ names: string[] }>(
+        `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/topics`,
+        { method: 'PUT', body: { names }, signal },
+      )
+      return { ok: true, names: data.names }
+    } catch (error) {
+      if (error instanceof GithubError && (error.status === 404 || error.status === 422)) {
+        return { ok: false, reason: 'Could not update topics (repository not found or a topic is invalid).' }
+      }
+      throw error
+    }
+  }
+
+  async listGists(options: { perPage?: number; signal?: AbortSignal } = {}): Promise<GistItem[]> {
+    const params = new URLSearchParams({
+      per_page: String(Math.max(1, Math.min(options.perPage ?? 20, 100))),
+    })
+    const data = await this.request<Array<{
+      id: string
+      description: string | null
+      files: Record<string, unknown>
+      owner: { login: string } | null
+      public: boolean
+      created_at: string
+      updated_at: string
+      html_url: string
+    }>>(`/gists?${params}`, { signal: options.signal })
+    return data.map(item => ({
+      id: item.id,
+      description: item.description ?? '',
+      files: Object.keys(item.files ?? {}),
+      owner: item.owner?.login ?? null,
+      public: item.public,
+      createdAt: item.created_at,
+      updatedAt: item.updated_at,
+      url: item.html_url,
+    }))
+  }
+
+  async createGist(input: { description?: string; publicGist?: boolean; files: Array<{ filename: string; content: string }> }, signal?: AbortSignal): Promise<GistCreateResult> {
+    try {
+      const files: Record<string, { content: string }> = {}
+      for (const file of input.files) files[file.filename] = { content: file.content }
+      const data = await this.request<{ id: string; html_url: string }>('/gists', {
+        method: 'POST',
+        body: {
+          description: input.description ?? '',
+          public: input.publicGist ?? false,
+          files,
+        },
+        signal,
+      })
+      return { ok: true, id: data.id, url: data.html_url }
+    } catch (error) {
+      if (error instanceof GithubError && (error.status === 404 || error.status === 422)) {
+        return { ok: false, reason: 'Could not create the gist (invalid files or description).' }
       }
       throw error
     }

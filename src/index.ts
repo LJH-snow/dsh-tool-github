@@ -2035,5 +2035,213 @@ export function createTools(client: GithubClient) {
         return client.dispatchWorkflow(args.owner as string, args.repo as string, args.workflowId as number, { ref: args.ref as string, inputs }, exec.signal)
       },
     }),
+
+    defineTool({
+      name: 'github_create_repository',
+      description: 'Create a GitHub repository for the authenticated user or an organization. WRITE operation: requires a token.',
+      parameters: {
+        owner: { type: 'string', description: 'Organization owner. Omit to create under the authenticated user.' },
+        name: { type: 'string', required: true, description: 'Repository name, e.g. agent-tools' },
+        description: { type: 'string', description: 'Repository description' },
+        privateRepo: { type: 'boolean', description: 'Create as private (default false)' },
+        autoInit: { type: 'boolean', description: 'Initialize with a README (default false)' },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            ok: { type: 'boolean', description: 'Whether the repository was created' },
+            fullName: { type: 'string', description: 'Owner/name of the created repository' },
+            url: { type: 'string', description: 'Repository URL' },
+            reason: { type: 'string', description: 'Explanation when not created' },
+          },
+        },
+        render: (_args, value) => {
+          if (value.ok) return [{ type: 'text', text: `Created repository: ${value.fullName} (${value.url})` }]
+          return [{ type: 'text', text: `Could not create repository: ${value.reason}` }]
+        },
+      },
+      presentCall(args): ToolCallView {
+        return { card: 'generic', title: `Create repository ${args.name}`, kind: 'edit' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { ok?: boolean; fullName?: string; url?: string; reason?: string }
+        if (v.ok) return { card: 'generic', title: `Created ${v.fullName}`, content: [{ type: 'text', text: v.url ?? '' }] }
+        return { card: 'generic', title: 'Create repository failed', content: [{ type: 'text', text: v.reason ?? 'Unknown' }] }
+      },
+      async execute(args, exec) {
+        if (!client.hasToken()) {
+          return { ok: false, reason: 'Creating a repository requires a GitHub token. Configure the plugin with a token.' }
+        }
+        return client.createRepository({
+          owner: args.owner as string | undefined,
+          name: args.name as string,
+          description: args.description as string | undefined,
+          privateRepo: args.privateRepo as boolean | undefined,
+          autoInit: args.autoInit as boolean | undefined,
+        }, exec.signal)
+      },
+    }),
+
+    defineTool({
+      name: 'github_set_repo_topics',
+      description: 'Set the complete topic list on a GitHub repository. WRITE operation: requires a token and overwrites existing topics.',
+      parameters: {
+        owner: { type: 'string', required: true, description: 'Repository owner' },
+        repo: { type: 'string', required: true, description: 'Repository name' },
+        topics: { type: 'array', items: { type: 'string' }, required: true, description: 'Topic names to set, 1-20 items' },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            ok: { type: 'boolean', description: 'Whether topics were updated' },
+            names: { type: 'array', items: { type: 'string' }, description: 'Topics currently set on the repository' },
+            reason: { type: 'string', description: 'Explanation when topics were not updated' },
+          },
+        },
+        render: (_args, value) => {
+          if (value.ok) return [{ type: 'text', text: `Topics updated: ${(value.names ?? []).join(', ')}` }]
+          return [{ type: 'text', text: `Could not update topics: ${value.reason}` }]
+        },
+      },
+      presentCall(args): ToolCallView {
+        return { card: 'generic', title: `Set topics: ${args.owner}/${args.repo}`, kind: 'edit' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { ok?: boolean; names?: string[]; reason?: string }
+        if (v.ok) return { card: 'generic', title: 'Topics updated', content: [{ type: 'text', text: (v.names ?? []).join(', ') }] }
+        return { card: 'generic', title: 'Update topics failed', content: [{ type: 'text', text: v.reason ?? 'Unknown' }] }
+      },
+      async execute(args, exec) {
+        if (!client.hasToken()) {
+          return { ok: false, reason: 'Updating repository topics requires a GitHub token. Configure the plugin with a token.' }
+        }
+        const topics = (args.topics as string[]) ?? []
+        if (topics.length === 0) {
+          return { ok: false, reason: 'Provide at least one topic. Topics are set as a complete list.' }
+        }
+        return client.setRepoTopic(args.owner as string, args.repo as string, topics, exec.signal)
+      },
+    }),
+
+    defineTool({
+      name: 'github_list_gists',
+      description: 'List gists for the authenticated user, or public gists when no token is configured. Returns file names, timestamps, and URLs.',
+      parameters: {
+        limit: { type: 'integer', description: 'Maximum results, 1-50 (default 20)' },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            items: {
+              type: 'array',
+              items: {
+                type: 'object',
+                additionalProperties: false,
+                properties: {
+                  id: { type: 'string', description: 'Gist id' },
+                  description: { type: 'string', description: 'Gist description' },
+                  files: { type: 'array', items: { type: 'string' }, description: 'File names' },
+                  owner: { oneOf: [{ type: 'string' }, { type: 'null' }], description: 'Owner login' },
+                  public: { type: 'boolean', description: 'Whether the gist is public' },
+                  createdAt: { type: 'string', description: 'ISO creation timestamp' },
+                  updatedAt: { type: 'string', description: 'ISO update timestamp' },
+                  url: { type: 'string', description: 'Gist URL' },
+                },
+              },
+            },
+          },
+        },
+        render: (_args, value) => {
+          const items = value.items ?? []
+          if (items.length === 0) return [{ type: 'text', text: 'No gists found.' }]
+          const lines = items.map(item => `${item.owner ?? 'anonymous'} / ${item.id} (${(item.files ?? []).join(', ')}, updated ${item.updatedAt})`)
+          return [{ type: 'text', text: lines.join('\n') }]
+        },
+      },
+      presentCall(_args): ToolCallView {
+        return { card: 'generic', title: 'List gists', kind: 'search' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { items?: Array<{ id: string; files: string[]; owner: string | null }> }
+        const items = v.items ?? []
+        if (items.length === 0) return { card: 'generic', title: 'No gists' }
+        return {
+          card: 'generic',
+          title: `${items.length} gist(s)`,
+          content: [{ type: 'text', text: items.map(i => `${i.owner ?? 'anonymous'}: ${i.id} (${i.files.join(', ')})`).join('\n') }],
+        }
+      },
+      async execute(args, exec) {
+        const limit = args.limit === undefined ? 20 : Math.max(1, Math.min(args.limit as number, 50))
+        const items = await client.listGists({ perPage: limit, signal: exec.signal })
+        return { items }
+      },
+    }),
+
+    defineTool({
+      name: 'github_create_gist',
+      description: 'Create a GitHub gist with one or more files. WRITE operation: requires a token.',
+      parameters: {
+        description: { type: 'string', description: 'Gist description' },
+        publicGist: { type: 'boolean', description: 'Create as public (default false)' },
+        files: {
+          type: 'array',
+          required: true,
+          items: {
+            type: 'object',
+            additionalProperties: false,
+            properties: {
+              filename: { type: 'string', required: true, description: 'File name, e.g. notes.txt' },
+              content: { type: 'string', required: true, description: 'File content' },
+            },
+          },
+          description: 'Files to include in the gist',
+        },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            ok: { type: 'boolean', description: 'Whether the gist was created' },
+            id: { type: 'string', description: 'Gist id' },
+            url: { type: 'string', description: 'Gist URL' },
+            reason: { type: 'string', description: 'Explanation when not created' },
+          },
+        },
+        render: (_args, value) => {
+          if (value.ok) return [{ type: 'text', text: `Created gist: ${value.url}` }]
+          return [{ type: 'text', text: `Could not create gist: ${value.reason}` }]
+        },
+      },
+      presentCall(args): ToolCallView {
+        return { card: 'generic', title: `Create gist (${((args.files as Array<{ filename: string }>) ?? []).length} files)`, kind: 'edit' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { ok?: boolean; id?: string; url?: string; reason?: string }
+        if (v.ok) return { card: 'generic', title: `Gist ${v.id}`, content: [{ type: 'text', text: v.url ?? '' }] }
+        return { card: 'generic', title: 'Create gist failed', content: [{ type: 'text', text: v.reason ?? 'Unknown' }] }
+      },
+      async execute(args, exec) {
+        if (!client.hasToken()) {
+          return { ok: false, reason: 'Creating a gist requires a GitHub token. Configure the plugin with a token.' }
+        }
+        const files = (args.files as Array<{ filename: string; content: string }>) ?? []
+        if (files.length === 0) {
+          return { ok: false, reason: 'Provide at least one file.' }
+        }
+        return client.createGist({
+          description: args.description as string | undefined,
+          publicGist: args.publicGist as boolean | undefined,
+          files,
+        }, exec.signal)
+      },
+    }),
   ]
 }

@@ -88,6 +88,10 @@ npm install /path/to/dsh-tool-github
 | `github_star_repo` | star 仓库 | 是 |
 | `github_unstar_repo` | 取消 star | 是 |
 | `github_create_release` | 为 tag 创建 Release | 是 |
+| `github_create_repository` | 创建用户或组织仓库 | 是 |
+| `github_set_repo_topics` | 设置仓库完整 topics 列表 | 是 |
+| `github_list_gists` | 列出当前用户/公开 gist | 否 |
+| `github_create_gist` | 创建公开或私有 gist | 是 |
 | `github_create_pr_draft` | 创建 draft PR（head/base/title/body） | 是 |
 
 ### 行为约定（遵循官方 execute 契约）
