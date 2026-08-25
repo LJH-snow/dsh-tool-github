@@ -1,3 +1,5 @@
+import { inflateRawSync } from 'node:zlib'
+
 /** GitHub REST client with injected fetch for testability. */
 
 export interface GithubClientOptions {
@@ -60,6 +62,55 @@ export interface PrItem {
   baseRef: string
   createdAt: string
   url: string
+}
+
+export interface PullRequestDetail {
+  number: number
+  title: string
+  state: string
+  draft: boolean
+  author: string
+  headRef: string
+  headSha: string
+  baseRef: string
+  baseSha: string
+  body: string
+  mergeable: boolean | null
+  merged: boolean
+  reviewDecision: string | null
+  additions: number
+  deletions: number
+  changedFiles: number
+  createdAt: string
+  updatedAt: string
+  mergedAt: string | null
+  url: string
+}
+
+export interface PullRequestReviewItem {
+  id: number
+  author: string
+  state: string
+  body: string
+  submittedAt: string
+  commitSha: string | null
+  url: string
+}
+
+export interface PrReviewersResult {
+  ok: boolean
+  prNumber?: number
+  reviewers?: string[]
+  reason?: string
+}
+
+export interface PrReviewSubmitResult {
+  ok: boolean
+  prNumber?: number
+  reviewId?: number
+  state?: string
+  url?: string
+  reason?: string
 }
 
 export interface FileContent {
@@ -142,6 +193,65 @@ export interface WorkflowRunItem {
   url: string
 }
 
+export interface WorkflowItem {
+  id: number
+  name: string
+  path: string
+  state: string
+  updatedAt: string
+  url: string
+}
+
+export interface WorkflowRunDetail {
+  id: number
+  workflowId: number
+  workflowName: string
+  displayTitle: string
+  headBranch: string
+  headSha: string
+  status: string
+  conclusion: string | null
+  event: string
+  actor: string
+  createdAt: string
+  updatedAt: string
+  runStartedAt: string | null
+  url: string
+}
+
+export interface WorkflowJobStep {
+  number: number
+  name: string
+  status: string
+  conclusion: string | null
+  startedAt: string | null
+  completedAt: string | null
+}
+
+export interface WorkflowJobItem {
+  id: number
+  name: string
+  status: string
+  conclusion: string | null
+  startedAt: string | null
+  completedAt: string | null
+  steps: WorkflowJobStep[]
+  url: string
+}
+
+export interface WorkflowLogsResult {
+  found: boolean
+  logs?: string
+  truncated?: boolean
+  totalChars?: number
+}
+
+export interface WorkflowActionResult {
+  ok: boolean
+  runId?: number
+  reason?: string
+}
+
 export interface BranchCreateResult {
   ok: boolean
   name?: string
@@ -185,6 +295,63 @@ export class GithubError extends Error {
   constructor(message: string, readonly status: number) {
     super(message)
   }
+}
+
+function parseWorkflowLogZip(buffer: ArrayBuffer): string {
+  const bytes = Buffer.from(buffer)
+  const endMarker = 0x06054b50
+  let endOffset = -1
+  const start = Math.max(0, bytes.length - 0xffff - 22)
+  for (let i = bytes.length - 22; i >= start; i -= 1) {
+    if (bytes.readUInt32LE(i) === endMarker) {
+      endOffset = i
+      break
+    }
+  }
+  if (endOffset < 0) throw new GithubError('Workflow logs archive is invalid', 502)
+
+  const entryCount = bytes.readUInt16LE(endOffset + 10)
+  const centralOffset = bytes.readUInt32LE(endOffset + 16)
+  let offset = centralOffset
+  const parts: string[] = []
+  for (let i = 0; i < entryCount; i += 1) {
+    if (bytes.readUInt32LE(offset) !== 0x02014b50) {
+      throw new GithubError('Workflow logs archive is invalid', 502)
+    }
+    const method = bytes.readUInt16LE(offset + 10)
+    const compressedSize = bytes.readUInt32LE(offset + 20)
+    const uncompressedSize = bytes.readUInt32LE(offset + 24)
+    const nameLength = bytes.readUInt16LE(offset + 28)
+    const extraLength = bytes.readUInt16LE(offset + 30)
+    const commentLength = bytes.readUInt16LE(offset + 32)
+    const localOffset = bytes.readUInt32LE(offset + 42)
+    const name = bytes.subarray(offset + 46, offset + 46 + nameLength).toString('utf8')
+    const next = offset + 46 + nameLength + extraLength + commentLength
+
+    if (!name.endsWith('/')) {
+      if (bytes.readUInt32LE(localOffset) !== 0x04034b50) {
+        throw new GithubError('Workflow logs archive is invalid', 502)
+      }
+      const localNameLength = bytes.readUInt16LE(localOffset + 26)
+      const localExtraLength = bytes.readUInt16LE(localOffset + 28)
+      const dataStart = localOffset + 30 + localNameLength + localExtraLength
+      const raw = bytes.subarray(dataStart, dataStart + compressedSize)
+      let content: Buffer
+      if (method === 0) {
+        content = Buffer.from(raw)
+      } else if (method === 8) {
+        content = inflateRawSync(raw)
+      } else {
+        throw new GithubError('Unsupported compression in workflow logs archive', 502)
+      }
+      if (content.length !== uncompressedSize) {
+        throw new GithubError('Workflow logs archive is invalid', 502)
+      }
+      parts.push(`--- ${name} ---\n${content.toString('utf8')}`)
+    }
+    offset = next
+  }
+  return parts.join('\n')
 }
 
 export class GithubClient {
@@ -233,7 +400,8 @@ export class GithubClient {
     if (res.status === 403) throw new GithubError('GitHub rate limit exceeded or forbidden', 403)
     if (!res.ok) throw new GithubError(`GitHub API error ${res.status}`, res.status)
     if (res.status === 204) return undefined as T
-    return (await res.json()) as T
+    const text = await res.text()
+    return (text ? JSON.parse(text) : undefined) as T
   }
 
   async getRepo(owner: string, repo: string, signal?: AbortSignal): Promise<RepoInfo> {
@@ -745,6 +913,286 @@ export class GithubClient {
     } catch (error) {
       if (error instanceof GithubError && error.status === 422) {
         return { ok: false, reason: 'Validation failed (e.g. the tag does not exist or the release already exists).' }
+      }
+      throw error
+    }
+  }
+
+  async listWorkflows(owner: string, repo: string, options: { perPage?: number; signal?: AbortSignal } = {}): Promise<{ total: number; items: WorkflowItem[] }> {
+    const params = new URLSearchParams({
+      per_page: String(Math.max(1, Math.min(options.perPage ?? 10, 100))),
+    })
+    const data = await this.request<{
+      total_count: number
+      workflows: Array<{
+        id: number
+        name: string
+        path: string
+        state: string
+        updated_at: string
+        html_url: string
+      }>
+    }>(`/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/actions/workflows?${params}`, { signal: options.signal })
+    return {
+      total: data.total_count,
+      items: data.workflows.map(item => ({
+        id: item.id,
+        name: item.name,
+        path: item.path,
+        state: item.state,
+        updatedAt: item.updated_at,
+        url: item.html_url,
+      })),
+    }
+  }
+
+  async getWorkflow(owner: string, repo: string, workflowId: number, signal?: AbortSignal): Promise<WorkflowItem> {
+    const data = await this.request<{
+      id: number
+      name: string
+      path: string
+      state: string
+      updated_at: string
+      html_url: string
+    }>(`/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/actions/workflows/${workflowId}`, { signal })
+    return {
+      id: data.id,
+      name: data.name,
+      path: data.path,
+      state: data.state,
+      updatedAt: data.updated_at,
+      url: data.html_url,
+    }
+  }
+
+  async getWorkflowRun(owner: string, repo: string, runId: number, signal?: AbortSignal): Promise<WorkflowRunDetail> {
+    const data = await this.request<{
+      id: number
+      workflow_id: number
+      name: string | null
+      display_title: string
+      head_branch: string
+      head_sha: string
+      status: string
+      conclusion: string | null
+      event: string
+      actor: { login: string } | null
+      created_at: string
+      updated_at: string
+      run_started_at: string | null
+      html_url: string
+    }>(`/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/actions/runs/${runId}`, { signal })
+    return {
+      id: data.id,
+      workflowId: data.workflow_id,
+      workflowName: data.name ?? data.display_title,
+      displayTitle: data.display_title,
+      headBranch: data.head_branch,
+      headSha: data.head_sha,
+      status: data.status,
+      conclusion: data.conclusion,
+      event: data.event,
+      actor: data.actor?.login ?? 'unknown',
+      createdAt: data.created_at,
+      updatedAt: data.updated_at,
+      runStartedAt: data.run_started_at,
+      url: data.html_url,
+    }
+  }
+
+  async listWorkflowJobs(owner: string, repo: string, runId: number, options: { perPage?: number; signal?: AbortSignal } = {}): Promise<{ found: boolean; items: WorkflowJobItem[] }> {
+    const params = new URLSearchParams({
+      per_page: String(Math.max(1, Math.min(options.perPage ?? 30, 100))),
+    })
+    const data = await this.request<{ jobs: Array<{
+      id: number
+      name: string
+      status: string
+      conclusion: string | null
+      started_at: string | null
+      completed_at: string | null
+      html_url: string
+      steps: Array<{
+        number: number
+        name: string
+        status: string
+        conclusion: string | null
+        started_at: string | null
+        completed_at: string | null
+      }>
+    }> }>(`/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/actions/runs/${runId}/jobs?${params}`, { signal: options.signal })
+    return {
+      found: true,
+      items: data.jobs.map(job => ({
+        id: job.id,
+        name: job.name,
+        status: job.status,
+        conclusion: job.conclusion,
+        startedAt: job.started_at,
+        completedAt: job.completed_at,
+        steps: (job.steps ?? []).map(step => ({
+          number: step.number,
+          name: step.name,
+          status: step.status,
+          conclusion: step.conclusion,
+          startedAt: step.started_at,
+          completedAt: step.completed_at,
+        })),
+        url: job.html_url,
+      })),
+    }
+  }
+
+  async getWorkflowRunLogs(owner: string, repo: string, runId: number, options: { maxChars?: number; signal?: AbortSignal } = {}): Promise<WorkflowLogsResult> {
+    const url = `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/actions/runs/${runId}/logs`
+    const res = await this.fetchImpl(`${this.baseUrl}${url}`, {
+      headers: this.headers(),
+      method: 'GET',
+      signal: this.combinedSignal(options.signal),
+    })
+    if (res.status === 404) throw new GithubError('Not found', 404)
+    if (res.status === 401) throw new GithubError('Invalid or missing GitHub token', 401)
+    if (res.status === 403) throw new GithubError('GitHub rate limit exceeded or forbidden', 403)
+    if (!res.ok) throw new GithubError(`GitHub API error ${res.status}`, res.status)
+
+    const logs = parseWorkflowLogZip(await res.arrayBuffer())
+    const maxChars = options.maxChars && options.maxChars > 0 ? options.maxChars : 200_000
+    if (logs.length > maxChars) {
+      return { found: true, logs: logs.slice(0, maxChars), truncated: true, totalChars: logs.length }
+    }
+    return { found: true, logs, totalChars: logs.length }
+  }
+
+  async rerunWorkflowRun(owner: string, repo: string, runId: number, signal?: AbortSignal): Promise<WorkflowActionResult> {
+    try {
+      await this.request<unknown>(
+        `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/actions/runs/${runId}/rerun`,
+        { method: 'POST', body: {}, signal },
+      )
+      return { ok: true, runId }
+    } catch (error) {
+      if (error instanceof GithubError && (error.status === 404 || error.status === 409)) {
+        return { ok: false, runId, reason: 'Cannot rerun this workflow run (not found or another run is already in progress).' }
+      }
+      throw error
+    }
+  }
+
+  async cancelWorkflowRun(owner: string, repo: string, runId: number, signal?: AbortSignal): Promise<WorkflowActionResult> {
+    try {
+      await this.request<unknown>(
+        `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/actions/runs/${runId}/cancel`,
+        { method: 'POST', body: {}, signal },
+      )
+      return { ok: true, runId }
+    } catch (error) {
+      if (error instanceof GithubError && (error.status === 404 || error.status === 409)) {
+        return { ok: false, runId, reason: 'Cannot cancel this workflow run (not found or the run is already complete).' }
+      }
+      throw error
+    }
+  }
+
+  async getPullRequest(owner: string, repo: string, prNumber: number, signal?: AbortSignal): Promise<PullRequestDetail> {
+    const data = await this.request<{
+      number: number
+      title: string
+      state: string
+      draft: boolean
+      user: { login: string } | null
+      head: { ref: string; sha: string }
+      base: { ref: string; sha: string }
+      body: string | null
+      mergeable: boolean | null
+      merged: boolean
+      review_decision: string | null
+      additions: number
+      deletions: number
+      changed_files: number
+      created_at: string
+      updated_at: string
+      merged_at: string | null
+      html_url: string
+    }>(`/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/pulls/${prNumber}`, { signal })
+    return {
+      number: data.number,
+      title: data.title,
+      state: data.state,
+      draft: data.draft,
+      author: data.user?.login ?? 'unknown',
+      headRef: data.head.ref,
+      headSha: data.head.sha,
+      baseRef: data.base.ref,
+      baseSha: data.base.sha,
+      body: data.body ?? '',
+      mergeable: data.mergeable,
+      merged: data.merged,
+      reviewDecision: data.review_decision,
+      additions: data.additions,
+      deletions: data.deletions,
+      changedFiles: data.changed_files,
+      createdAt: data.created_at,
+      updatedAt: data.updated_at,
+      mergedAt: data.merged_at,
+      url: data.html_url,
+    }
+  }
+
+  async listPullRequestReviews(owner: string, repo: string, prNumber: number, options: { perPage?: number; signal?: AbortSignal } = {}): Promise<PullRequestReviewItem[]> {
+    const params = new URLSearchParams({
+      per_page: String(Math.max(1, Math.min(options.perPage ?? 20, 100))),
+    })
+    const data = await this.request<Array<{
+      id: number
+      user: { login: string } | null
+      state: string
+      body: string | null
+      submitted_at: string
+      commit_id: string
+      html_url: string
+    }>>(`/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/pulls/${prNumber}/reviews?${params}`, { signal: options.signal })
+    return data.map(item => ({
+      id: item.id,
+      author: item.user?.login ?? 'unknown',
+      state: item.state,
+      body: item.body ?? '',
+      submittedAt: item.submitted_at,
+      commitSha: item.commit_id || null,
+      url: item.html_url,
+    }))
+  }
+
+  async requestPrReviewers(owner: string, repo: string, prNumber: number, input: { reviewers?: string[]; teamReviewers?: string[] }, signal?: AbortSignal): Promise<PrReviewersResult> {
+    try {
+      const body: Record<string, string[]> = {}
+      if (input.reviewers && input.reviewers.length > 0) body.reviewers = input.reviewers
+      if (input.teamReviewers && input.teamReviewers.length > 0) body.team_reviewers = input.teamReviewers
+      const data = await this.request<{
+        number: number
+        requested_reviewers: Array<{ login: string }>
+      }>(
+        `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/pulls/${prNumber}/requested_reviewers`,
+        { method: 'POST', body, signal },
+      )
+      return { ok: true, prNumber: data.number, reviewers: data.requested_reviewers.map(reviewer => reviewer.login) }
+    } catch (error) {
+      if (error instanceof GithubError && (error.status === 404 || error.status === 422)) {
+        return { ok: false, prNumber, reason: 'Could not request reviewers (PR not found or a reviewer is invalid).' }
+      }
+      throw error
+    }
+  }
+
+  async submitPrReview(owner: string, repo: string, prNumber: number, input: { body: string; event: 'APPROVE' | 'REQUEST_CHANGES' | 'COMMENT' }, signal?: AbortSignal): Promise<PrReviewSubmitResult> {
+    try {
+      const data = await this.request<{ id: number; state: string; html_url: string }>(
+        `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/pulls/${prNumber}/reviews`,
+        { method: 'POST', body: { body: input.body, event: input.event }, signal },
+      )
+      return { ok: true, reviewId: data.id, state: data.state, url: data.html_url }
+    } catch (error) {
+      if (error instanceof GithubError && (error.status === 404 || error.status === 422)) {
+        return { ok: false, prNumber, reason: 'Could not submit the review (PR not found or the review payload is invalid).' }
       }
       throw error
     }

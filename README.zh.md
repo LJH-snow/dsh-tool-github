@@ -67,8 +67,19 @@ npm install /path/to/dsh-tool-github
 | `github_get_issue` | 查看 issue 详情（标题、状态、作者、标签、body） | 否 |
 | `github_list_issue_comments` | 列出 issue 评论（作者、时间、内容） | 否 |
 | `github_list_pr_comments` | 列出 PR review 评论（作者、时间、内容） | 否 |
+| `github_get_pull_request` | 查看 PR 详情（分支、合并状态、评审结论、改动统计） | 否 |
+| `github_list_pull_request_reviews` | 列出 PR 评审（评审人、状态、内容、时间） | 否 |
+| `github_request_pr_reviewers` | 邀请用户或团队评审 PR | 是 |
+| `github_submit_pr_review` | 批准、请求修改或评论 PR | 是 |
 | `github_get_user` | 查询用户/组织信息（名称、bio、粉丝、仓库数） | 否 |
 | `github_list_workflow_runs` | 查看 Actions 运行（workflow、分支、状态） | 否* |
+| `github_list_workflows` | 查看仓库 Actions workflows（名称、路径、状态） | 否* |
+| `github_get_workflow` | 查看单个 workflow 详情 | 否* |
+| `github_get_workflow_run` | 查看 workflow run 详情 | 否* |
+| `github_list_workflow_jobs` | 查看 run 的 job 与步骤 | 否* |
+| `github_get_workflow_run_logs` | 下载并解码 workflow run 日志（上限 20 万字符） | 否* |
+| `github_rerun_workflow_run` | 重新运行 workflow run | 是 |
+| `github_cancel_workflow_run` | 取消进行中的 workflow run | 是 |
 | `github_create_branch` | 创建分支（从指定 ref） | 是 |
 | `github_write_file` | 创建/更新文件（自动提交） | 是 |
 | `github_get_readme` | 读取仓库 README（markdown） | 否 |

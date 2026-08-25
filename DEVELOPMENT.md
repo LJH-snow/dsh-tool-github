@@ -207,7 +207,46 @@ v0.6 方向：补齐「看 README、看版本标签、star/unstar、发 Release�
 
 - 验收：typecheck ✅；71/71 单测（含无 token、204 处理、404/422 错误路径）；README 工具表同步；本文档日志更新。
 
+### 阶段 11：Actions 运维与 PR 评审闭环（2026-08-25 新增）
+
+v0.7 方向：把 Agent 从「看到 CI 运行列表」推进到「能查 workflow、查 job/日志、重跑/取消 CI」，并把 PR 从「创建/合并」补成「详情 + 评审 + 邀评 + 提交评审」的完整闭环。
+
+| 工具 | 功能 | 需 token | 状态 |
+|---|---|---|---|
+| `github_list_workflows` | 列出仓库 Actions workflows（名称/路径/状态） | 否* | ✅ 已实现 |
+| `github_get_workflow` | 查询单个 workflow 详情 | 否* | ✅ 已实现 |
+| `github_get_workflow_run` | 查询 workflow run 详情（分支/SHA/事件/结论） | 否* | ✅ 已实现 |
+| `github_list_workflow_jobs` | 查询 run 的 job 与步骤（状态/时间） | 否* | ✅ 已实现 |
+| `github_get_workflow_run_logs` | 下载解压 run 日志，输出上限 20 万字符 | 否* | ✅ 已实现 |
+| `github_rerun_workflow_run` | 重跑 workflow run（写） | 是 | ✅ 已实现 |
+| `github_cancel_workflow_run` | 取消进行中的 workflow run（写） | 是 | ✅ 已实现 |
+| `github_get_pull_request` | 查询 PR 详情（分支/SHA/合并状态/评审结论/改动统计） | 否 | ✅ 已实现 |
+| `github_list_pull_request_reviews` | 列出 PR 评审（评审人/状态/body/时间） | 否 | ✅ 已实现 |
+| `github_request_pr_reviewers` | 邀请用户或团队评审（写；至少提供一个 reviewer） | 是 | ✅ 已实现 |
+| `github_submit_pr_review` | 提交 APPROVE/REQUEST_CHANGES/COMMENT 评审（写） | 是 | ✅ 已实现 |
+
+安全设计：
+- `github_rerun_workflow_run`、`github_cancel_workflow_run`、`github_request_pr_reviewers`、`github_submit_pr_review` 均为写操作：无 token 返回 `{ ok: false, reason: '... token ...' }` 业务值。
+- 404/409/422 尽量映射为业务失败值；401/403 仍抛基础设施错误。
+- 日志下载可能很大：客户端解析 GitHub zip 后按 200,000 字符截断，并返回 `truncated`/`totalChars`；`output.render` 再按 10,000 字符预览。
+
+- 验收：typecheck ✅；86/86 单测（含 zip 解析、POST body、404/409/422、无 token、presentCall）；README 中英文工具表同步；本文档日志更新。
+
 ## 5. 开发日志（每次推进后追加，带时间戳）
+
+### 2026-08-25（阶段 11：Actions 运维与 PR 评审闭环完成，共 37 个工具）
+- 新增 7 个 Actions 工具：
+  - 只读：`github_list_workflows`、`github_get_workflow`、`github_get_workflow_run`、`github_list_workflow_jobs`、`github_get_workflow_run_logs`。
+  - 写操作：`github_rerun_workflow_run`、`github_cancel_workflow_run`（均需 token；404/409 → 业务失败值）。
+  - 日志端点返回 zip；客户端实现轻量 ZIP 读取（local/central directory + zlib inflateRawSync），结果按 200,000 字符截断并带 `truncated`/`totalChars`。
+- 新增 4 个 PR 工具：
+  - `github_get_pull_request`：PR 详情（head/base SHA、mergeable、review_decision、additions/deletions/changed_files）。
+  - `github_list_pull_request_reviews`：PR 评审列表。
+  - `github_request_pr_reviewers`：POST requested_reviewers；支持 reviewers/team_reviewers，至少提供一个。
+  - `github_submit_pr_review`：POST reviews；支持 APPROVE/REQUEST_CHANGES/COMMENT。
+- 客户端 `request` 兼容无 body 的 201/202 响应（改为先读 text，空则返回 undefined），避免 rerun/cancel 空响应 JSON 解析失败。
+- 测试：client +10（workflows/workflow/run/jobs/log zip/rerun+cancel/PR detail/reviews/request reviewers/submit review），tools +5（只读成功、无 token、404、空 reviewers 校验、presentCall）；共 86/86 通过。
+- 验证：typecheck ✅、vitest 86/86 ✅、build ✅；README 中英文同步（37 工具）。
 
 ### 2026-08-14（阶段 5：高频工具扩展完成）
 - 新增 3 个只读工具（延续安全定位，共 8 个工具）：

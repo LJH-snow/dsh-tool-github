@@ -16,6 +16,7 @@ const tools = () => Object.fromEntries(createTools(new GithubClient({ fetchImpl:
 describe('tool definitions', () => {
   it('registers the planned tools', () => {
     expect(Object.keys(tools()).sort()).toEqual([
+      'github_cancel_workflow_run',
       'github_comment_issue',
       'github_create_branch',
       'github_create_issue',
@@ -23,22 +24,32 @@ describe('tool definitions', () => {
       'github_create_release',
       'github_get_file',
       'github_get_issue',
+      'github_get_pull_request',
       'github_get_readme',
       'github_get_repo',
       'github_get_user',
+      'github_get_workflow',
+      'github_get_workflow_run',
+      'github_get_workflow_run_logs',
       'github_list_branches',
       'github_list_commits',
       'github_list_issue_comments',
       'github_list_issues',
       'github_list_pr_comments',
       'github_list_prs',
+      'github_list_pull_request_reviews',
       'github_list_releases',
       'github_list_tags',
+      'github_list_workflow_jobs',
       'github_list_workflow_runs',
+      'github_list_workflows',
       'github_merge_pr',
+      'github_request_pr_reviewers',
+      'github_rerun_workflow_run',
       'github_search_code',
       'github_search_repos',
       'github_star_repo',
+      'github_submit_pr_review',
       'github_unstar_repo',
       'github_update_issue',
       'github_write_file',
@@ -134,9 +145,10 @@ describe('tool presentation (pure render intents)', () => {
 })
 
 describe('extended tools (stage 5)', () => {
-  it('registers all twenty-six tools', () => {
+  it('registers all thirty-seven tools', () => {
     const names = Object.keys(Object.fromEntries(createTools(new GithubClient()).map(t => [t.name, t]))).sort()
     expect(names).toEqual([
+      'github_cancel_workflow_run',
       'github_comment_issue',
       'github_create_branch',
       'github_create_issue',
@@ -144,22 +156,32 @@ describe('extended tools (stage 5)', () => {
       'github_create_release',
       'github_get_file',
       'github_get_issue',
+      'github_get_pull_request',
       'github_get_readme',
       'github_get_repo',
       'github_get_user',
+      'github_get_workflow',
+      'github_get_workflow_run',
+      'github_get_workflow_run_logs',
       'github_list_branches',
       'github_list_commits',
       'github_list_issue_comments',
       'github_list_issues',
       'github_list_pr_comments',
       'github_list_prs',
+      'github_list_pull_request_reviews',
       'github_list_releases',
       'github_list_tags',
+      'github_list_workflow_jobs',
       'github_list_workflow_runs',
+      'github_list_workflows',
       'github_merge_pr',
+      'github_request_pr_reviewers',
+      'github_rerun_workflow_run',
       'github_search_code',
       'github_search_repos',
       'github_star_repo',
+      'github_submit_pr_review',
       'github_unstar_repo',
       'github_update_issue',
       'github_write_file',
@@ -356,5 +378,72 @@ describe('stage 10 tools', () => {
     expect(defs['github_star_repo'].presentCall({ owner: 'a', repo: 'b' })).toMatchObject({ kind: 'edit' })
     expect(defs['github_unstar_repo'].presentCall({ owner: 'a', repo: 'b' })).toMatchObject({ kind: 'edit' })
     expect(defs['github_create_release'].presentCall({ owner: 'a', repo: 'b', tagName: 'v1' })).toMatchObject({ kind: 'edit' })
+  })
+})
+
+describe('stage 11 tools', () => {
+  it('read-only new tools work without a token', async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse(200, { total_count: 0, workflows: [] }))
+    const first = new GithubClient({ fetchImpl })
+    const defs = Object.fromEntries(createTools(first).map(t => [t.name, t]))
+    expect(await defs['github_list_workflows'].execute({ owner: 'a', repo: 'b' }, exec())).toEqual({ total: 0, items: [] })
+
+    const reviewFetch = vi.fn(async () => jsonResponse(200, []))
+    const second = new GithubClient({ fetchImpl: reviewFetch })
+    const reviewDefs = Object.fromEntries(createTools(second).map(t => [t.name, t]))
+    expect(await reviewDefs['github_list_pull_request_reviews'].execute({ owner: 'a', repo: 'b', prNumber: 5 }, exec())).toEqual({ found: true, items: [] })
+  })
+
+  it('write tools require a token', async () => {
+    const defs = Object.fromEntries(createTools(new GithubClient({ fetchImpl: vi.fn() })).map(t => [t.name, t]))
+    const cases: Array<{ name: string; args: Record<string, unknown> }> = [
+      { name: 'github_rerun_workflow_run', args: { owner: 'a', repo: 'b', runId: 1 } },
+      { name: 'github_cancel_workflow_run', args: { owner: 'a', repo: 'b', runId: 1 } },
+      { name: 'github_request_pr_reviewers', args: { owner: 'a', repo: 'b', prNumber: 1, reviewers: ['alice'] } },
+      { name: 'github_submit_pr_review', args: { owner: 'a', repo: 'b', prNumber: 1, body: 'LGTM', event: 'APPROVE' } },
+    ]
+    for (const { name, args } of cases) {
+      const result = await defs[name].execute(args, exec())
+      expect(result.ok).toBe(false)
+      expect(result.reason).toContain('token')
+    }
+  })
+
+  it('keyed detail tools return found:false on 404', async () => {
+    const defs = Object.fromEntries(createTools(new GithubClient({ fetchImpl: vi.fn(async () => jsonResponse(404, {})) })).map(t => [t.name, t]))
+    const cases: Array<{ name: string; args: Record<string, unknown> }> = [
+      { name: 'github_get_workflow', args: { owner: 'a', repo: 'b', workflowId: 1 } },
+      { name: 'github_get_workflow_run', args: { owner: 'a', repo: 'b', runId: 1 } },
+      { name: 'github_get_workflow_run_logs', args: { owner: 'a', repo: 'b', runId: 1 } },
+      { name: 'github_list_workflow_jobs', args: { owner: 'a', repo: 'b', runId: 1 } },
+      { name: 'github_get_pull_request', args: { owner: 'a', repo: 'b', prNumber: 1 } },
+      { name: 'github_list_pull_request_reviews', args: { owner: 'a', repo: 'b', prNumber: 1 } },
+    ]
+    for (const { name, args } of cases) {
+      expect(await defs[name].execute(args, exec())).toMatchObject({ found: false })
+    }
+  })
+
+  it('github_request_pr_reviewers validates an empty reviewer list', async () => {
+    const client = new GithubClient({ token: 'ghp_test', fetchImpl: vi.fn() })
+    const tool = createTools(client).find(t => t.name === 'github_request_pr_reviewers')!
+    const result = await tool.execute({ owner: 'a', repo: 'b', prNumber: 1 }, exec())
+    expect(result).toMatchObject({ ok: false })
+    expect(result.reason).toContain('reviewer')
+  })
+
+  it('presentCall for stage 11 tools', () => {
+    const defs = Object.fromEntries(createTools(new GithubClient()).map(t => [t.name, t])) as any
+    expect(defs['github_list_workflows'].presentCall({ owner: 'a', repo: 'b' })).toMatchObject({ kind: 'search' })
+    expect(defs['github_get_workflow'].presentCall({ owner: 'a', repo: 'b', workflowId: 1 })).toMatchObject({ kind: 'read' })
+    expect(defs['github_get_workflow_run'].presentCall({ owner: 'a', repo: 'b', runId: 1 })).toMatchObject({ kind: 'read' })
+    expect(defs['github_list_workflow_jobs'].presentCall({ owner: 'a', repo: 'b', runId: 1 })).toMatchObject({ kind: 'search' })
+    expect(defs['github_get_workflow_run_logs'].presentCall({ owner: 'a', repo: 'b', runId: 1 })).toMatchObject({ kind: 'read' })
+    expect(defs['github_rerun_workflow_run'].presentCall({ owner: 'a', repo: 'b', runId: 1 })).toMatchObject({ kind: 'edit' })
+    expect(defs['github_cancel_workflow_run'].presentCall({ owner: 'a', repo: 'b', runId: 1 })).toMatchObject({ kind: 'edit' })
+    expect(defs['github_get_pull_request'].presentCall({ owner: 'a', repo: 'b', prNumber: 1 })).toMatchObject({ kind: 'read' })
+    expect(defs['github_list_pull_request_reviews'].presentCall({ owner: 'a', repo: 'b', prNumber: 1 })).toMatchObject({ kind: 'search' })
+    expect(defs['github_request_pr_reviewers'].presentCall({ owner: 'a', repo: 'b', prNumber: 1, reviewers: ['alice'] })).toMatchObject({ kind: 'edit' })
+    expect(defs['github_submit_pr_review'].presentCall({ owner: 'a', repo: 'b', prNumber: 1, body: 'LGTM', event: 'APPROVE' })).toMatchObject({ kind: 'edit' })
   })
 })

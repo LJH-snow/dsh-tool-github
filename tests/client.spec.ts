@@ -5,6 +5,62 @@ function jsonResponse(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
 }
 
+function makeLogZip(files: Array<{ name: string; content: string }>): Buffer {
+  const locals: Buffer[] = []
+  const centrals: Buffer[] = []
+  let localSize = 0
+  for (const file of files) {
+    const name = Buffer.from(file.name, 'utf8')
+    const data = Buffer.from(file.content, 'utf8')
+    const local = Buffer.alloc(30 + name.length + data.length)
+    local.writeUInt32LE(0x04034b50, 0)
+    local.writeUInt16LE(20, 4)
+    local.writeUInt16LE(0, 6)
+    local.writeUInt16LE(0, 8)
+    local.writeUInt32LE(0, 14)
+    local.writeUInt32LE(data.length, 18)
+    local.writeUInt32LE(data.length, 22)
+    local.writeUInt16LE(name.length, 26)
+    local.writeUInt16LE(0, 28)
+    name.copy(local, 30)
+    data.copy(local, 30 + name.length)
+
+    const central = Buffer.alloc(46 + name.length)
+    central.writeUInt32LE(0x02014b50, 0)
+    central.writeUInt16LE(20, 4)
+    central.writeUInt16LE(20, 6)
+    central.writeUInt16LE(0, 8)
+    central.writeUInt16LE(0, 10)
+    central.writeUInt16LE(0, 12)
+    central.writeUInt32LE(0, 16)
+    central.writeUInt32LE(data.length, 20)
+    central.writeUInt32LE(data.length, 24)
+    central.writeUInt16LE(name.length, 28)
+    central.writeUInt16LE(0, 30)
+    central.writeUInt16LE(0, 32)
+    central.writeUInt16LE(0, 34)
+    central.writeUInt16LE(0, 36)
+    central.writeUInt32LE(0, 38)
+    central.writeUInt32LE(localSize, 42)
+    name.copy(central, 46)
+
+    locals.push(local)
+    centrals.push(central)
+    localSize += local.length
+  }
+  const centralDir = Buffer.concat(centrals)
+  const eocd = Buffer.alloc(22)
+  eocd.writeUInt32LE(0x06054b50, 0)
+  eocd.writeUInt16LE(0, 4)
+  eocd.writeUInt16LE(0, 6)
+  eocd.writeUInt16LE(files.length, 8)
+  eocd.writeUInt16LE(files.length, 10)
+  eocd.writeUInt32LE(centralDir.length, 12)
+  eocd.writeUInt32LE(localSize, 16)
+  eocd.writeUInt16LE(0, 20)
+  return Buffer.concat([...locals, centralDir, eocd])
+}
+
 describe('GithubClient', () => {
   it('fetches repo metadata with auth header and base URL', async () => {
     const fetchImpl = vi.fn(async () => jsonResponse(200, {
@@ -422,5 +478,127 @@ describe('GithubClient stage 10', () => {
     const client422 = new GithubClient({ token: 'ghp_test', fetchImpl: vi.fn(async () => jsonResponse(422, {})) })
     const failed = await client422.createRelease('a', 'b', { tagName: 'v1' })
     expect(failed.ok).toBe(false)
+  })
+})
+
+describe('GithubClient stage 11', () => {
+  it('listWorkflows hits the workflows endpoint and maps items', async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse(200, {
+      total_count: 1,
+      workflows: [{ id: 7, name: 'CI', path: '.github/workflows/ci.yml', state: 'active', updated_at: '2026-01-01T00:00:00Z', html_url: 'https://github.com/a/b/actions/workflows/ci.yml' }],
+    }))
+    const client = new GithubClient({ fetchImpl })
+    const result = await client.listWorkflows('a', 'b', { perPage: 5 })
+    const [url] = fetchImpl.mock.calls[0] as [string]
+    expect(url).toContain('/repos/a/b/actions/workflows?')
+    expect(url).toContain('per_page=5')
+    expect(result).toEqual({
+      total: 1,
+      items: [{ id: 7, name: 'CI', path: '.github/workflows/ci.yml', state: 'active', updatedAt: '2026-01-01T00:00:00Z', url: 'https://github.com/a/b/actions/workflows/ci.yml' }],
+    })
+  })
+
+  it('getWorkflow maps the workflow detail', async () => {
+    const client = new GithubClient({ fetchImpl: vi.fn(async () => jsonResponse(200, {
+      id: 7, name: 'CI', path: '.github/workflows/ci.yml', state: 'active', updated_at: '2026-01-01T00:00:00Z', html_url: 'https://x',
+    })) })
+    const workflow = await client.getWorkflow('a', 'b', 7)
+    expect(workflow).toMatchObject({ id: 7, name: 'CI', path: '.github/workflows/ci.yml', state: 'active' })
+  })
+
+  it('getWorkflowRun maps the run detail', async () => {
+    const client = new GithubClient({ fetchImpl: vi.fn(async () => jsonResponse(200, {
+      id: 9, workflow_id: 7, name: 'CI', display_title: 'Build main', head_branch: 'main', head_sha: 'abcdef1234567890',
+      status: 'completed', conclusion: 'success', event: 'push', actor: { login: 'alice' }, created_at: '2026-01-01T00:00:00Z',
+      updated_at: '2026-01-01T00:01:00Z', run_started_at: '2026-01-01T00:00:10Z', html_url: 'https://x',
+    })) })
+    const run = await client.getWorkflowRun('a', 'b', 9)
+    expect(run).toMatchObject({ id: 9, workflowId: 7, workflowName: 'CI', displayTitle: 'Build main', headBranch: 'main', conclusion: 'success', event: 'push', actor: 'alice' })
+  })
+
+  it('listWorkflowJobs maps jobs and steps', async () => {
+    const client = new GithubClient({ fetchImpl: vi.fn(async () => jsonResponse(200, {
+      total_count: 1,
+      jobs: [{
+        id: 10, name: 'build', status: 'completed', conclusion: 'success', started_at: '2026-01-01T00:00:00Z', completed_at: '2026-01-01T00:01:00Z', html_url: 'https://x/10',
+        steps: [{ number: 1, name: 'Checkout', status: 'completed', conclusion: 'success', started_at: '2026-01-01T00:00:00Z', completed_at: '2026-01-01T00:00:05Z' }],
+      }],
+    })) })
+    const result = await client.listWorkflowJobs('a', 'b', 9, { perPage: 50 })
+    expect(result).toMatchObject({ found: true, items: [{ id: 10, name: 'build', steps: [{ number: 1, name: 'Checkout', status: 'completed' }] }] })
+  })
+
+  it('getWorkflowRunLogs parses the GitHub log archive', async () => {
+    const zip = makeLogZip([
+      { name: '0_build.txt', content: 'hello workflow\n' },
+      { name: '1_test.txt', content: 'tests done\n' },
+    ])
+    const fetchImpl = vi.fn(async () => new Response(new Uint8Array(zip), { status: 200, headers: { 'content-type': 'application/zip' } }))
+    const client = new GithubClient({ fetchImpl })
+    const result = await client.getWorkflowRunLogs('a', 'b', 9)
+    expect(result.found).toBe(true)
+    expect(result.logs).toContain('hello workflow')
+    expect(result.logs).toContain('tests done')
+    expect(result.truncated).toBeUndefined()
+  })
+
+  it('rerunWorkflowRun and cancelWorkflowRun post and map 409', async () => {
+    const rerunFetch = vi.fn(async () => new Response(null, { status: 201 }))
+    const rerunClient = new GithubClient({ token: 'ghp_test', fetchImpl: rerunFetch })
+    expect(await rerunClient.rerunWorkflowRun('a', 'b', 9)).toEqual({ ok: true, runId: 9 })
+    expect(rerunFetch.mock.calls[0][0]).toContain('/actions/runs/9/rerun')
+    expect(rerunFetch.mock.calls[0][1]).toMatchObject({ method: 'POST' })
+
+    const cancelFetch = vi.fn(async () => new Response(null, { status: 202 }))
+    const cancelClient = new GithubClient({ token: 'ghp_test', fetchImpl: cancelFetch })
+    expect(await cancelClient.cancelWorkflowRun('a', 'b', 9)).toEqual({ ok: true, runId: 9 })
+    expect(cancelFetch.mock.calls[0][0]).toContain('/actions/runs/9/cancel')
+
+    const blockedClient = new GithubClient({ token: 'ghp_test', fetchImpl: vi.fn(async () => jsonResponse(409, {})) })
+    expect((await blockedClient.rerunWorkflowRun('a', 'b', 9)).ok).toBe(false)
+    expect((await blockedClient.cancelWorkflowRun('a', 'b', 9)).ok).toBe(false)
+  })
+
+  it('getPullRequest maps the PR detail', async () => {
+    const client = new GithubClient({ fetchImpl: vi.fn(async () => jsonResponse(200, {
+      number: 5, title: 'Fix bug', state: 'open', draft: false, user: { login: 'bob' },
+      head: { ref: 'feat/x', sha: 'abcdef1' }, base: { ref: 'main', sha: '1234567' }, body: 'details',
+      mergeable: true, merged: false, review_decision: 'APPROVED', additions: 10, deletions: 2, changed_files: 3,
+      created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-02T00:00:00Z', merged_at: null, html_url: 'https://x',
+    })) })
+    const pr = await client.getPullRequest('a', 'b', 5)
+    expect(pr).toMatchObject({ number: 5, title: 'Fix bug', author: 'bob', headRef: 'feat/x', baseRef: 'main', reviewDecision: 'APPROVED', changedFiles: 3 })
+  })
+
+  it('listPullRequestReviews maps review items', async () => {
+    const client = new GithubClient({ fetchImpl: vi.fn(async () => jsonResponse(200, [
+      { id: 12, user: { login: 'carol' }, state: 'APPROVED', body: 'LGTM', submitted_at: '2026-01-02T00:00:00Z', commit_id: 'abcdef1', html_url: 'https://x/12' },
+    ])) })
+    const reviews = await client.listPullRequestReviews('a', 'b', 5, { perPage: 5 })
+    expect(reviews).toEqual([{ id: 12, author: 'carol', state: 'APPROVED', body: 'LGTM', submittedAt: '2026-01-02T00:00:00Z', commitSha: 'abcdef1', url: 'https://x/12' }])
+  })
+
+  it('requestPrReviewers posts reviewers and maps 422', async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse(200, { number: 5, requested_reviewers: [{ login: 'alice' }, { login: 'bob' }] }))
+    const client = new GithubClient({ token: 'ghp_test', fetchImpl })
+    const result = await client.requestPrReviewers('a', 'b', 5, { reviewers: ['alice', 'bob'], teamReviewers: ['core'] })
+    const [, init] = fetchImpl.mock.calls[0] as [string, RequestInit]
+    expect(JSON.parse(String(init.body))).toEqual({ reviewers: ['alice', 'bob'], team_reviewers: ['core'] })
+    expect(result).toEqual({ ok: true, prNumber: 5, reviewers: ['alice', 'bob'] })
+
+    const failed = new GithubClient({ token: 'ghp_test', fetchImpl: vi.fn(async () => jsonResponse(422, {})) })
+    expect((await failed.requestPrReviewers('a', 'b', 5, { reviewers: ['nope'] })).ok).toBe(false)
+  })
+
+  it('submitPrReview posts the review payload and maps 422', async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse(201, { id: 30, state: 'APPROVED', html_url: 'https://x/30' }))
+    const client = new GithubClient({ token: 'ghp_test', fetchImpl })
+    const result = await client.submitPrReview('a', 'b', 5, { body: 'LGTM', event: 'APPROVE' })
+    const [, init] = fetchImpl.mock.calls[0] as [string, RequestInit]
+    expect(JSON.parse(String(init.body))).toEqual({ body: 'LGTM', event: 'APPROVE' })
+    expect(result).toEqual({ ok: true, reviewId: 30, state: 'APPROVED', url: 'https://x/30' })
+
+    const failed = new GithubClient({ token: 'ghp_test', fetchImpl: vi.fn(async () => jsonResponse(422, {})) })
+    expect((await failed.submitPrReview('a', 'b', 5, { body: 'x', event: 'COMMENT' })).ok).toBe(false)
   })
 })

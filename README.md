@@ -65,8 +65,19 @@ Full example: [examples/cordis.yml](examples/cordis.yml).
 | `github_get_issue` | Get issue details (title, state, author, labels, body) | no |
 | `github_list_issue_comments` | List issue comments (author, time, body) | no |
 | `github_list_pr_comments` | List PR review comments (author, time, body) | no |
+| `github_get_pull_request` | Get PR details (branches, merge state, review decision, diff stats) | no |
+| `github_list_pull_request_reviews` | List PR reviews (reviewer, state, body, time) | no |
+| `github_request_pr_reviewers` | Request user or team reviewers on a PR | yes |
+| `github_submit_pr_review` | Approve, request changes, or comment on a PR | yes |
 | `github_get_user` | Get user/org info (name, bio, followers, repos) | no |
 | `github_list_workflow_runs` | List Actions runs (workflow, branch, status) | no* |
+| `github_list_workflows` | List Actions workflows (name, path, state) | no* |
+| `github_get_workflow` | Get a workflow detail | no* |
+| `github_get_workflow_run` | Get a workflow run detail | no* |
+| `github_list_workflow_jobs` | List jobs and steps for a workflow run | no* |
+| `github_get_workflow_run_logs` | Download and decode workflow run logs (200k char cap) | no* |
+| `github_rerun_workflow_run` | Rerun a workflow run | yes |
+| `github_cancel_workflow_run` | Cancel an in-progress workflow run | yes |
 | `github_create_branch` | Create a branch from a ref | yes |
 | `github_write_file` | Create/update a file (creates a commit) | yes |
 | `github_get_readme` | Read the repository README (markdown) | no |

@@ -1309,6 +1309,632 @@ export function createTools(client: GithubClient) {
     }),
 
     defineTool({
+      name: 'github_list_workflows',
+      description: 'List GitHub Actions workflows in a repository: name, workflow file path, state, and update time.',
+      parameters: {
+        owner: { type: 'string', required: true, description: 'Repository owner' },
+        repo: { type: 'string', required: true, description: 'Repository name' },
+        limit: { type: 'integer', description: 'Maximum results, 1-50 (default 10)' },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            total: { type: 'integer', description: 'Total number of workflows' },
+            items: {
+              type: 'array',
+              items: {
+                type: 'object',
+                additionalProperties: false,
+                properties: {
+                  id: { type: 'integer', description: 'Workflow id' },
+                  name: { type: 'string', description: 'Workflow name' },
+                  path: { type: 'string', description: 'Workflow file path' },
+                  state: { type: 'string', description: 'Workflow state' },
+                  updatedAt: { type: 'string', description: 'ISO update timestamp' },
+                  url: { type: 'string', description: 'Workflow URL' },
+                },
+              },
+            },
+          },
+        },
+        render: (_args, value) => {
+          const items = value.items ?? []
+          if (items.length === 0) return [{ type: 'text', text: 'No workflows found.' }]
+          const lines = items.map(item => `${item.name} (${item.path}, ${item.state}, updated ${item.updatedAt})`)
+          return [{ type: 'text', text: `Found ${value.total ?? items.length} workflows:\n${lines.join('\n')}` }]
+        },
+      },
+      presentCall(args): ToolCallView {
+        return { card: 'generic', title: `Workflows: ${args.owner}/${args.repo}`, kind: 'search' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { total?: number; items?: Array<{ name: string }> }
+        const items = v.items ?? []
+        if (items.length === 0) return { card: 'generic', title: 'No workflows' }
+        return {
+          card: 'generic',
+          title: `${v.total ?? items.length} workflow(s)`,
+          content: [{ type: 'text', text: items.map(i => i.name).join('\n') }],
+        }
+      },
+      async execute(args, exec) {
+        const limit = args.limit === undefined ? 10 : Math.max(1, Math.min(args.limit, 50))
+        return client.listWorkflows(args.owner, args.repo, { perPage: limit, signal: exec.signal })
+      },
+    }),
+
+    defineTool({
+      name: 'github_get_workflow',
+      description: 'Get details of a single GitHub Actions workflow: name, file path, state, and update time.',
+      parameters: {
+        owner: { type: 'string', required: true, description: 'Repository owner' },
+        repo: { type: 'string', required: true, description: 'Repository name' },
+        workflowId: { type: 'integer', required: true, description: 'Workflow id' },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            found: { type: 'boolean', description: 'Whether the workflow exists' },
+            id: { type: 'integer', description: 'Workflow id' },
+            name: { type: 'string', description: 'Workflow name' },
+            path: { type: 'string', description: 'Workflow file path' },
+            state: { type: 'string', description: 'Workflow state' },
+            updatedAt: { type: 'string', description: 'ISO update timestamp' },
+            url: { type: 'string', description: 'Workflow URL' },
+          },
+        },
+        render: (_args, value) => {
+          if (!value.found) return [{ type: 'text', text: 'Workflow not found.' }]
+          return [{ type: 'text', text: `${value.name} (${value.path}, ${value.state})\nupdated: ${value.updatedAt}\n${value.url}` }]
+        },
+      },
+      presentCall(args): ToolCallView {
+        return { card: 'generic', title: `Workflow #${args.workflowId}`, kind: 'read' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { found?: boolean; name?: string; state?: string }
+        if (!v.found) return { card: 'generic', title: 'Workflow not found' }
+        return { card: 'generic', title: v.name ?? 'Workflow', content: [{ type: 'text', text: `state: ${v.state}` }] }
+      },
+      async execute(args, exec) {
+        try {
+          const workflow = await client.getWorkflow(args.owner, args.repo, args.workflowId, exec.signal)
+          return { found: true, ...workflow }
+        } catch (error) {
+          if (error instanceof GithubError && error.status === 404) {
+            return { found: false }
+          }
+          throw error
+        }
+      },
+    }),
+
+    defineTool({
+      name: 'github_get_workflow_run',
+      description: 'Get details of a GitHub Actions workflow run: workflow, branch, head SHA, event, status, conclusion, and timing.',
+      parameters: {
+        owner: { type: 'string', required: true, description: 'Repository owner' },
+        repo: { type: 'string', required: true, description: 'Repository name' },
+        runId: { type: 'integer', required: true, description: 'Workflow run id' },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            found: { type: 'boolean', description: 'Whether the run exists' },
+            id: { type: 'integer', description: 'Run id' },
+            workflowId: { type: 'integer', description: 'Workflow id' },
+            workflowName: { type: 'string', description: 'Workflow name' },
+            displayTitle: { type: 'string', description: 'Display title' },
+            headBranch: { type: 'string', description: 'Branch' },
+            headSha: { type: 'string', description: 'Commit SHA' },
+            status: { type: 'string', description: 'Run status' },
+            conclusion: { oneOf: [{ type: 'string' }, { type: 'null' }], description: 'Run conclusion when completed' },
+            event: { type: 'string', description: 'Trigger event' },
+            actor: { type: 'string', description: 'Actor login' },
+            createdAt: { type: 'string', description: 'ISO created timestamp' },
+            updatedAt: { type: 'string', description: 'ISO updated timestamp' },
+            runStartedAt: { oneOf: [{ type: 'string' }, { type: 'null' }], description: 'ISO run start timestamp' },
+            url: { type: 'string', description: 'Run URL' },
+          },
+        },
+        render: (_args, value) => {
+          if (!value.found) return [{ type: 'text', text: 'Workflow run not found.' }]
+          const conclusion = value.conclusion ? ` -> ${value.conclusion}` : ''
+          return [{ type: 'text', text: [
+            `${value.displayTitle ?? value.workflowName} (run #${value.id})`,
+            `workflow: ${value.workflowName}`,
+            `branch: ${value.headBranch} @ ${(value.headSha ?? '').slice(0, 7)}`,
+            `status: ${value.status}${conclusion}`,
+            `event: ${value.event} by @${value.actor}`,
+            `created: ${value.createdAt}`,
+            `started: ${value.runStartedAt ?? 'n/a'}`,
+            `updated: ${value.updatedAt}`,
+            value.url ?? '',
+          ].filter(Boolean).join('\n') }]
+        },
+      },
+      presentCall(args): ToolCallView {
+        return { card: 'generic', title: `CI run #${args.runId}`, kind: 'read' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { found?: boolean; id?: number; displayTitle?: string; workflowName?: string; status?: string; conclusion?: string | null }
+        if (!v.found) return { card: 'generic', title: 'Workflow run not found' }
+        return {
+          card: 'generic',
+          title: `CI run #${v.id}`,
+          content: [{ type: 'text', text: `${v.status}${v.conclusion ? ` -> ${v.conclusion}` : ''}` }],
+        }
+      },
+      async execute(args, exec) {
+        try {
+          const run = await client.getWorkflowRun(args.owner, args.repo, args.runId, exec.signal)
+          return { found: true, ...run }
+        } catch (error) {
+          if (error instanceof GithubError && error.status === 404) {
+            return { found: false }
+          }
+          throw error
+        }
+      },
+    }),
+
+    defineTool({
+      name: 'github_list_workflow_jobs',
+      description: 'List jobs of a GitHub Actions workflow run, including each job and its steps with statuses and timings.',
+      parameters: {
+        owner: { type: 'string', required: true, description: 'Repository owner' },
+        repo: { type: 'string', required: true, description: 'Repository name' },
+        runId: { type: 'integer', required: true, description: 'Workflow run id' },
+        limit: { type: 'integer', description: 'Maximum jobs, 1-100 (default 30)' },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            found: { type: 'boolean', description: 'Whether the run exists' },
+            items: {
+              type: 'array',
+              items: {
+                type: 'object',
+                additionalProperties: false,
+                properties: {
+                  id: { type: 'integer', description: 'Job id' },
+                  name: { type: 'string', description: 'Job name' },
+                  status: { type: 'string', description: 'Job status' },
+                  conclusion: { oneOf: [{ type: 'string' }, { type: 'null' }], description: 'Job conclusion' },
+                  startedAt: { oneOf: [{ type: 'string' }, { type: 'null' }], description: 'ISO start timestamp' },
+                  completedAt: { oneOf: [{ type: 'string' }, { type: 'null' }], description: 'ISO completion timestamp' },
+                  url: { type: 'string', description: 'Job URL' },
+                  steps: {
+                    type: 'array',
+                    items: {
+                      type: 'object',
+                      additionalProperties: false,
+                      properties: {
+                        number: { type: 'integer', description: 'Step number' },
+                        name: { type: 'string', description: 'Step name' },
+                        status: { type: 'string', description: 'Step status' },
+                        conclusion: { oneOf: [{ type: 'string' }, { type: 'null' }], description: 'Step conclusion' },
+                        startedAt: { oneOf: [{ type: 'string' }, { type: 'null' }], description: 'ISO start timestamp' },
+                        completedAt: { oneOf: [{ type: 'string' }, { type: 'null' }], description: 'ISO completion timestamp' },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        render: (_args, value) => {
+          if (!value.found) return [{ type: 'text', text: 'Workflow run not found.' }]
+          const items = value.items ?? []
+          if (items.length === 0) return [{ type: 'text', text: 'No jobs found.' }]
+          const lines = items.map(job => {
+            const conclusion = job.conclusion ? ` -> ${job.conclusion}` : ''
+            const steps = (job.steps ?? []).map(step => {
+              const stepConclusion = step.conclusion ? ` -> ${step.conclusion}` : ''
+              return `  ${step.number}. ${step.name}: ${step.status}${stepConclusion}`
+            }).join('\n')
+            return `#${job.id} ${job.name} (${job.status}${conclusion})${steps ? `\n${steps}` : ''}`
+          })
+          return [{ type: 'text', text: lines.join('\n\n') }]
+        },
+      },
+      presentCall(args): ToolCallView {
+        return { card: 'generic', title: `Jobs for CI run #${args.runId}`, kind: 'search' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { found?: boolean; items?: Array<{ name: string; status: string; conclusion?: string | null }> }
+        if (!v.found) return { card: 'generic', title: 'Workflow run not found' }
+        const items = v.items ?? []
+        if (items.length === 0) return { card: 'generic', title: 'No jobs' }
+        return {
+          card: 'generic',
+          title: `${items.length} job(s)`,
+          content: [{ type: 'text', text: items.map(i => `${i.name}: ${i.conclusion ?? i.status}`).join('\n') }],
+        }
+      },
+      async execute(args, exec) {
+        const limit = args.limit === undefined ? 30 : Math.max(1, Math.min(args.limit, 100))
+        try {
+          return await client.listWorkflowJobs(args.owner, args.repo, args.runId, { perPage: limit, signal: exec.signal })
+        } catch (error) {
+          if (error instanceof GithubError && error.status === 404) {
+            return { found: false, items: [] }
+          }
+          throw error
+        }
+      },
+    }),
+
+    defineTool({
+      name: 'github_get_workflow_run_logs',
+      description: 'Download and decode GitHub Actions workflow run logs. Returns the combined log text, capped to 200,000 characters.',
+      parameters: {
+        owner: { type: 'string', required: true, description: 'Repository owner' },
+        repo: { type: 'string', required: true, description: 'Repository name' },
+        runId: { type: 'integer', required: true, description: 'Workflow run id' },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            found: { type: 'boolean', description: 'Whether the run exists' },
+            logs: { type: 'string', description: 'Combined workflow logs (may be truncated)' },
+            truncated: { type: 'boolean', description: 'Whether logs were truncated to the output cap' },
+            totalChars: { type: 'integer', description: 'Total decoded log characters' },
+          },
+        },
+        render: (_args, value) => {
+          if (!value.found) return [{ type: 'text', text: 'Workflow run not found.' }]
+          const logs = value.logs ?? ''
+          const preview = logs.length > 10_000 ? `${logs.slice(0, 10_000)}\n... [truncated preview, ${logs.length} chars total]` : logs
+          const note = value.truncated ? `\n\n[Logs truncated by tool to ${value.totalChars ?? logs.length} total chars]\n` : ''
+          return [{ type: 'text', text: `${preview}${note}` }]
+        },
+      },
+      presentCall(args): ToolCallView {
+        return { card: 'generic', title: `CI logs for run #${args.runId}`, kind: 'read' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { found?: boolean; logs?: string; truncated?: boolean; totalChars?: number }
+        if (!v.found) return { card: 'generic', title: 'Workflow run not found' }
+        return {
+          card: 'generic',
+          title: `CI logs (${v.totalChars ?? (v.logs ?? '').length} chars)`,
+          content: [{ type: 'text', text: `${v.truncated ? 'truncated: ' : ''}${(v.logs ?? '').slice(0, 120)}` }],
+        }
+      },
+      async execute(args, exec) {
+        try {
+          return await client.getWorkflowRunLogs(args.owner, args.repo, args.runId, { signal: exec.signal })
+        } catch (error) {
+          if (error instanceof GithubError && error.status === 404) {
+            return { found: false }
+          }
+          throw error
+        }
+      },
+    }),
+
+    defineTool({
+      name: 'github_rerun_workflow_run',
+      description: 'Rerun a GitHub Actions workflow run. WRITE operation: requires a token and starts a new run.',
+      parameters: {
+        owner: { type: 'string', required: true, description: 'Repository owner' },
+        repo: { type: 'string', required: true, description: 'Repository name' },
+        runId: { type: 'integer', required: true, description: 'Workflow run id' },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            ok: { type: 'boolean', description: 'Whether the rerun was requested' },
+            runId: { type: 'integer', description: 'Workflow run id' },
+            reason: { type: 'string', description: 'Explanation when not rerun' },
+          },
+        },
+        render: (_args, value) => {
+          if (value.ok) return [{ type: 'text', text: `Rerun requested for workflow run #${value.runId}` }]
+          return [{ type: 'text', text: `Could not rerun workflow run #${value.runId}: ${value.reason}` }]
+        },
+      },
+      presentCall(args): ToolCallView {
+        return { card: 'generic', title: `Rerun CI run #${args.runId}`, kind: 'edit' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { ok?: boolean; runId?: number; reason?: string }
+        if (v.ok) return { card: 'generic', title: `Rerun requested for run #${v.runId}` }
+        return { card: 'generic', title: 'Rerun failed', content: [{ type: 'text', text: v.reason ?? 'Unknown' }] }
+      },
+      async execute(args, exec) {
+        if (!client.hasToken()) {
+          return { ok: false, runId: args.runId, reason: 'Rerunning a workflow requires a GitHub token. Configure the plugin with a token.' }
+        }
+        return client.rerunWorkflowRun(args.owner, args.repo, args.runId, exec.signal)
+      },
+    }),
+
+    defineTool({
+      name: 'github_cancel_workflow_run',
+      description: 'Cancel a GitHub Actions workflow run. WRITE operation: requires a token and stops an in-progress run.',
+      parameters: {
+        owner: { type: 'string', required: true, description: 'Repository owner' },
+        repo: { type: 'string', required: true, description: 'Repository name' },
+        runId: { type: 'integer', required: true, description: 'Workflow run id' },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            ok: { type: 'boolean', description: 'Whether cancellation was requested' },
+            runId: { type: 'integer', description: 'Workflow run id' },
+            reason: { type: 'string', description: 'Explanation when not cancelled' },
+          },
+        },
+        render: (_args, value) => {
+          if (value.ok) return [{ type: 'text', text: `Cancellation requested for workflow run #${value.runId}` }]
+          return [{ type: 'text', text: `Could not cancel workflow run #${value.runId}: ${value.reason}` }]
+        },
+      },
+      presentCall(args): ToolCallView {
+        return { card: 'generic', title: `Cancel CI run #${args.runId}`, kind: 'edit' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { ok?: boolean; runId?: number; reason?: string }
+        if (v.ok) return { card: 'generic', title: `Cancellation requested for run #${v.runId}` }
+        return { card: 'generic', title: 'Cancel failed', content: [{ type: 'text', text: v.reason ?? 'Unknown' }] }
+      },
+      async execute(args, exec) {
+        if (!client.hasToken()) {
+          return { ok: false, runId: args.runId, reason: 'Cancelling a workflow requires a GitHub token. Configure the plugin with a token.' }
+        }
+        return client.cancelWorkflowRun(args.owner, args.repo, args.runId, exec.signal)
+      },
+    }),
+
+    defineTool({
+      name: 'github_get_pull_request',
+      description: 'Get details of a GitHub pull request: branches, SHAs, body, merge state, review decision, changed files, and timestamps.',
+      parameters: {
+        owner: { type: 'string', required: true, description: 'Repository owner' },
+        repo: { type: 'string', required: true, description: 'Repository name' },
+        prNumber: { type: 'integer', required: true, description: 'Pull request number' },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            found: { type: 'boolean', description: 'Whether the pull request exists' },
+            number: { type: 'integer', description: 'PR number' },
+            title: { type: 'string', description: 'PR title' },
+            state: { type: 'string', description: 'PR state' },
+            draft: { type: 'boolean', description: 'Whether the PR is a draft' },
+            author: { type: 'string', description: 'Author login' },
+            headRef: { type: 'string', description: 'Head branch' },
+            headSha: { type: 'string', description: 'Head commit SHA' },
+            baseRef: { type: 'string', description: 'Base branch' },
+            baseSha: { type: 'string', description: 'Base commit SHA' },
+            body: { type: 'string', description: 'PR body (Markdown)' },
+            mergeable: { oneOf: [{ type: 'boolean' }, { type: 'null' }], description: 'Whether GitHub can merge the PR' },
+            merged: { type: 'boolean', description: 'Whether the PR is merged' },
+            reviewDecision: { oneOf: [{ type: 'string' }, { type: 'null' }], description: 'Review decision' },
+            additions: { type: 'integer', description: 'Added line count' },
+            deletions: { type: 'integer', description: 'Deleted line count' },
+            changedFiles: { type: 'integer', description: 'Changed file count' },
+            createdAt: { type: 'string', description: 'ISO created timestamp' },
+            updatedAt: { type: 'string', description: 'ISO updated timestamp' },
+            mergedAt: { oneOf: [{ type: 'string' }, { type: 'null' }], description: 'ISO merged timestamp' },
+            url: { type: 'string', description: 'PR URL' },
+          },
+        },
+        render: (_args, value) => {
+          if (!value.found) return [{ type: 'text', text: 'Pull request not found.' }]
+          const status = value.merged ? 'merged' : value.draft ? 'draft' : value.state
+          const review = value.reviewDecision ? `, review: ${value.reviewDecision}` : ''
+          const merge = value.mergeable === null ? '' : value.mergeable ? ', mergeable' : ', not mergeable'
+          const body = value.body ? `\n\n${value.body}` : ''
+          return [{ type: 'text', text: [
+            `#${value.number} ${value.title} (${status}, @${value.author})${review}${merge}`,
+            `${value.headRef} (${(value.headSha ?? '').slice(0, 7)}) -> ${value.baseRef} (${(value.baseSha ?? '').slice(0, 7)})`,
+            `+${value.additions} -${value.deletions} in ${value.changedFiles} files`,
+            `created: ${value.createdAt}, updated: ${value.updatedAt}`,
+            value.url ?? '',
+            body,
+          ].filter(Boolean).join('\n') }]
+        },
+      },
+      presentCall(args): ToolCallView {
+        return { card: 'generic', title: `PR #${args.prNumber}`, kind: 'read' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { found?: boolean; number?: number; title?: string; state?: string }
+        if (!v.found) return { card: 'generic', title: 'Pull request not found' }
+        return { card: 'generic', title: `PR #${v.number} ${v.title}`, content: [{ type: 'text', text: `state: ${v.state}` }] }
+      },
+      async execute(args, exec) {
+        try {
+          const pr = await client.getPullRequest(args.owner, args.repo, args.prNumber, exec.signal)
+          return { found: true, ...pr }
+        } catch (error) {
+          if (error instanceof GithubError && error.status === 404) {
+            return { found: false }
+          }
+          throw error
+        }
+      },
+    }),
+
+    defineTool({
+      name: 'github_list_pull_request_reviews',
+      description: 'List reviews on a GitHub pull request: reviewer, review state, body, and submission time.',
+      parameters: {
+        owner: { type: 'string', required: true, description: 'Repository owner' },
+        repo: { type: 'string', required: true, description: 'Repository name' },
+        prNumber: { type: 'integer', required: true, description: 'Pull request number' },
+        limit: { type: 'integer', description: 'Maximum results, 1-50 (default 20)' },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            found: { type: 'boolean', description: 'Whether the pull request exists' },
+            items: {
+              type: 'array',
+              items: {
+                type: 'object',
+                additionalProperties: false,
+                properties: {
+                  id: { type: 'integer', description: 'Review id' },
+                  author: { type: 'string', description: 'Reviewer login' },
+                  state: { type: 'string', description: 'Review state' },
+                  body: { type: 'string', description: 'Review body' },
+                  submittedAt: { type: 'string', description: 'ISO submission timestamp' },
+                  commitSha: { oneOf: [{ type: 'string' }, { type: 'null' }], description: 'Reviewed commit SHA' },
+                  url: { type: 'string', description: 'Review URL' },
+                },
+              },
+            },
+          },
+        },
+        render: (_args, value) => {
+          if (!value.found) return [{ type: 'text', text: 'Pull request not found.' }]
+          const items = value.items ?? []
+          if (items.length === 0) return [{ type: 'text', text: 'No reviews found.' }]
+          const lines = items.map(item => `@${item.author} [${item.state}] (${item.submittedAt}): ${(item.body ?? '').slice(0, 500)}`)
+          return [{ type: 'text', text: lines.join('\n\n') }]
+        },
+      },
+      presentCall(args): ToolCallView {
+        return { card: 'generic', title: `Reviews: PR #${args.prNumber}`, kind: 'search' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { found?: boolean; items?: Array<{ author: string; state: string }> }
+        if (!v.found) return { card: 'generic', title: 'Pull request not found' }
+        const items = v.items ?? []
+        if (items.length === 0) return { card: 'generic', title: 'No reviews' }
+        return {
+          card: 'generic',
+          title: `${items.length} review(s)`,
+          content: [{ type: 'text', text: items.map(i => `@${i.author}: ${i.state}`).join('\n') }],
+        }
+      },
+      async execute(args, exec) {
+        const limit = args.limit === undefined ? 20 : Math.max(1, Math.min(args.limit, 50))
+        try {
+          const items = await client.listPullRequestReviews(args.owner, args.repo, args.prNumber, { perPage: limit, signal: exec.signal })
+          return { found: true, items }
+        } catch (error) {
+          if (error instanceof GithubError && error.status === 404) {
+            return { found: false, items: [] }
+          }
+          throw error
+        }
+      },
+    }),
+
+    defineTool({
+      name: 'github_request_pr_reviewers',
+      description: 'Request reviewers on a GitHub pull request. WRITE operation: requires a token; supports users or team reviewers.',
+      parameters: {
+        owner: { type: 'string', required: true, description: 'Repository owner' },
+        repo: { type: 'string', required: true, description: 'Repository name' },
+        prNumber: { type: 'integer', required: true, description: 'Pull request number' },
+        reviewers: { type: 'array', items: { type: 'string' }, description: 'GitHub usernames to request' },
+        teamReviewers: { type: 'array', items: { type: 'string' }, description: 'Team slugs to request (requires organization permissions)' },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            ok: { type: 'boolean', description: 'Whether reviewers were requested' },
+            prNumber: { type: 'integer', description: 'PR number' },
+            reviewers: { type: 'array', items: { type: 'string' }, description: 'Requested reviewer logins' },
+            reason: { type: 'string', description: 'Explanation when not requested' },
+          },
+        },
+        render: (_args, value) => {
+          if (value.ok) return [{ type: 'text', text: `Requested reviewers for PR #${value.prNumber}: ${(value.reviewers ?? []).join(', ')}` }]
+          return [{ type: 'text', text: `Could not request reviewers for PR #${value.prNumber}: ${value.reason}` }]
+        },
+      },
+      presentCall(args): ToolCallView {
+        return { card: 'generic', title: `Request reviewers for PR #${args.prNumber}`, kind: 'edit' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { ok?: boolean; prNumber?: number; reviewers?: string[]; reason?: string }
+        if (v.ok) return { card: 'generic', title: `Reviewers requested for PR #${v.prNumber}`, content: [{ type: 'text', text: (v.reviewers ?? []).join(', ') }] }
+        return { card: 'generic', title: 'Request reviewers failed', content: [{ type: 'text', text: v.reason ?? 'Unknown' }] }
+      },
+      async execute(args, exec) {
+        if (!client.hasToken()) {
+          return { ok: false, prNumber: args.prNumber, reason: 'Requesting reviewers requires a GitHub token. Configure the plugin with a token.' }
+        }
+        if (!args.reviewers?.length && !args.teamReviewers?.length) {
+          return { ok: false, prNumber: args.prNumber, reason: 'Provide at least one reviewer or team reviewer.' }
+        }
+        return client.requestPrReviewers(args.owner, args.repo, args.prNumber, { reviewers: args.reviewers, teamReviewers: args.teamReviewers }, exec.signal)
+      },
+    }),
+
+    defineTool({
+      name: 'github_submit_pr_review',
+      description: 'Submit a review on a GitHub pull request. WRITE operation: requires a token; event is APPROVE, REQUEST_CHANGES, or COMMENT.',
+      parameters: {
+        owner: { type: 'string', required: true, description: 'Repository owner' },
+        repo: { type: 'string', required: true, description: 'Repository name' },
+        prNumber: { type: 'integer', required: true, description: 'Pull request number' },
+        body: { type: 'string', required: true, description: 'Review summary (Markdown)' },
+        event: { type: 'string', enum: ['APPROVE', 'REQUEST_CHANGES', 'COMMENT'], required: true, description: 'Review event' },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            ok: { type: 'boolean', description: 'Whether the review was submitted' },
+            prNumber: { type: 'integer', description: 'PR number' },
+            reviewId: { type: 'integer', description: 'Review id' },
+            state: { type: 'string', description: 'Review state' },
+            url: { type: 'string', description: 'Review URL' },
+            reason: { type: 'string', description: 'Explanation when not submitted' },
+          },
+        },
+        render: (_args, value) => {
+          if (value.ok) return [{ type: 'text', text: `Submitted ${value.state} review on PR #${value.prNumber}: ${value.url}` }]
+          return [{ type: 'text', text: `Could not submit review on PR #${value.prNumber}: ${value.reason}` }]
+        },
+      },
+      presentCall(args): ToolCallView {
+        return { card: 'generic', title: `${args.event === 'APPROVE' ? 'Approve' : args.event === 'REQUEST_CHANGES' ? 'Request changes on' : 'Comment on'} PR #${args.prNumber}`, kind: 'edit' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { ok?: boolean; prNumber?: number; state?: string; url?: string; reason?: string }
+        if (v.ok) return { card: 'generic', title: `${v.state ?? 'Review'} submitted on PR #${v.prNumber}`, content: [{ type: 'text', text: v.url ?? '' }] }
+        return { card: 'generic', title: 'Submit review failed', content: [{ type: 'text', text: v.reason ?? 'Unknown' }] }
+      },
+      async execute(args, exec) {
+        if (!client.hasToken()) {
+          return { ok: false, prNumber: args.prNumber, reason: 'Submitting a PR review requires a GitHub token. Configure the plugin with a token.' }
+        }
+        return client.submitPrReview(args.owner, args.repo, args.prNumber, { body: args.body, event: args.event }, exec.signal)
+      },
+    }),
+
+    defineTool({
       name: 'github_create_pr_draft',
       description: 'Create a draft pull request on GitHub. Returns the PR number and URL when created.',
       parameters: {
