@@ -51,5 +51,8 @@
     "type": "git",
     "url": "git+https://github.com/LJH-snow/dsh-tool-github.git"
   },
-  "homepage": "https://github.com/LJH-snow/dsh-tool-github#readme"
+  "homepage": "https://github.com/LJH-snow/dsh-tool-github#readme",
+  "dependencies": {
+    "libsodium-wrappers": "^0.8.4"
+  }
 }

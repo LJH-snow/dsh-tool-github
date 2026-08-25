@@ -247,6 +247,7 @@ v0.8 方向：从「查看/重跑/取消 CI」继续推进到「能主动触发 
 | `github_set_repo_variable` | 创建或更新 Actions 仓库 variable | 是 | ✅ 已实现 |
 | `github_delete_repo_variable` | 删除 Actions 仓库 variable | 是 | ✅ 已实现 |
 | `github_list_repo_secrets` | 列出 Actions 仓库 secret 元信息 | 是 | ✅ 已实现 |
+| `github_set_repo_secret` | 创建或更新 Actions 仓库 secret（本地加密） | 是 | ✅ 已实现 |
 | `github_delete_repo_secret` | 删除 Actions 仓库 secret | 是 | ✅ 已实现 |
 | `github_get_branch_protection` | 查询分支保护规则 | 否 | ✅ 已实现 |
 | `github_set_branch_protection` | 更新分支保护规则 | 是 | ✅ 已实现 |
@@ -254,7 +255,7 @@ v0.8 方向：从「查看/重跑/取消 CI」继续推进到「能主动触发 
 
 安全设计：所有写工具无 token 时返回 `{ ok: false, reason: '... token ...' }` 业务值；404/409/422 尽量映射为业务失败值；401/403 仍抛基础设施错误。
 
-- 验收（阶段 12 完成）：typecheck ✅；109/109 单测（含 204 dispatch、inputs 映射、仓库/gist/治理错误路径、无 token、presentCall）。
+- 验收（阶段 12 完成）：typecheck ✅；110/110 单测（含 204 dispatch、inputs 映射、仓库/gist/治理错误路径、secret 加密、无 token、presentCall）。
 
 ## 5. 开发日志（每次推进后追加，带时间戳）
 
@@ -272,16 +273,16 @@ v0.8 方向：从「查看/重跑/取消 CI」继续推进到「能主动触发 
 - 测试：client +5（user/org 仓库、topics、gist 列表、gist 创建与 422），tools +4（只读 gist、无 token/空输入、写工具传参、presentCall）；共 99/99 通过。
 - 验证：typecheck ✅、vitest 99/99 ✅、build ✅；README 中英文工具表同步（42 工具）。
 
-### 2026-08-25（阶段 12 治理工具完成，共 50 个工具）
+### 2026-08-25（阶段 12 治理工具完成，共 51 个工具）
 - 新增 5 个 Actions 治理工具：
   - `github_list_repo_variables` / `github_set_repo_variable` / `github_delete_repo_variable`：variables 查询、upsert（POST，409 后 PATCH）、删除。
-  - `github_list_repo_secrets` / `github_delete_repo_secret`：secret 名称与时间元信息查询、删除；不读取 secret 值。
+  - `github_list_repo_secrets` / `github_set_repo_secret` / `github_delete_repo_secret`：secret 元信息查询、删除，以及基于仓库公钥的 `libsodium-wrappers` sealed box 本地加密写入；不读取 secret 值。
 - 新增 3 个分支保护工具：
   - `github_get_branch_protection`：读取 required checks、review 数量、admin 强制、linear history、force push/deletion 等规则；404 → `{ found: false }`。
   - `github_set_branch_protection` / `github_delete_branch_protection`：PUT/DELETE protection 端点，写操作需 token，404/409/422 → 业务失败值。
-- secret 值写回依赖 libsodium sealed box，当前不新增加密依赖；因此提供 secret 元信息查询与删除，variables 支持创建/更新/删除。
-- 测试：client +6（variables、变量 upsert、secret 删除、secrets 列表、分支保护读取/404、分支保护写入），tools +3（只读 404、无 token 守卫、治理写工具传参/presentCall）；共 109/109 通过。
-- 验证：typecheck ✅、vitest 109/109 ✅、build ✅；README 中英文工具表同步（50 工具）。
+- 新增依赖 `libsodium-wrappers`（runtime dependency），用于 GitHub Actions secret 的 sealed box 加密；明文 secret 只参与本地加密，不进入 API 请求体。
+- 测试：client +7（variables、变量 upsert、secret 加密往返、secret 删除、secrets 列表、分支保护读取/404、分支保护写入），tools +3（只读 404、无 token 守卫、治理写工具传参/presentCall）；共 110/110 通过。
+- 验证：typecheck ✅、vitest 110/110 ✅、build ✅；README 中英文工具表同步（51 工具）。
 
 ### 2026-08-25（阶段 11：Actions 运维与 PR 评审闭环完成，共 37 个工具）
 - 新增 7 个 Actions 工具：

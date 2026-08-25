@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
+import sodium from 'libsodium-wrappers'
 import { GithubClient, GithubError } from '../src/client.ts'
 
 function jsonResponse(status: number, body: unknown): Response {
@@ -782,5 +783,28 @@ describe('GithubClient stage 14', () => {
 
     const deleteClient = new GithubClient({ token: 'ghp_test', fetchImpl: vi.fn(async () => new Response(null, { status: 204 })) })
     expect(await deleteClient.deleteBranchProtection('a', 'b', 'main')).toEqual({ ok: true, branch: 'main' })
+  })
+
+  it('setRepoSecret encrypts the value with the repository public key', async () => {
+    await sodium.ready
+    const keyPair = sodium.crypto_box_keypair()
+    const fetchImpl = vi.fn(async (url, init) => {
+      if (String((init as RequestInit)?.method) === 'GET') {
+        return jsonResponse(200, { key_id: 'key-1', key: sodium.to_base64(keyPair.publicKey) })
+      }
+      return new Response(null, { status: 204 })
+    })
+    const client = new GithubClient({ token: 'ghp_test', fetchImpl })
+    const result = await client.setRepoSecret('a', 'b', 'API_KEY', 'super-secret')
+    expect(result).toEqual({ ok: true, name: 'API_KEY' })
+    expect(fetchImpl.mock.calls).toHaveLength(2)
+    const [keyUrl] = fetchImpl.mock.calls[0] as [string]
+    expect(keyUrl).toContain('/actions/secrets/public-key')
+    const [putUrl, putInit] = fetchImpl.mock.calls[1] as [string, RequestInit]
+    expect(putUrl).toContain('/actions/secrets/API_KEY')
+    expect(putInit.method).toBe('PUT')
+    const body = JSON.parse(String(putInit.body)) as { encrypted_value: string; key_id: string }
+    expect(body.key_id).toBe('key-1')
+    expect(sodium.crypto_box_seal_open(sodium.from_base64(body.encrypted_value), keyPair.publicKey, keyPair.privateKey, 'text')).toBe('super-secret')
   })
 })

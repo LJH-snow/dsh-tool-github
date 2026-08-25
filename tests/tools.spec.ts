@@ -59,6 +59,7 @@ describe('tool definitions', () => {
       'github_search_code',
       'github_search_repos',
       'github_set_branch_protection',
+      'github_set_repo_secret',
       'github_set_repo_topics',
       'github_set_repo_variable',
       'github_star_repo',
@@ -204,6 +205,7 @@ describe('extended tools (stage 5)', () => {
       'github_search_code',
       'github_search_repos',
       'github_set_branch_protection',
+      'github_set_repo_secret',
       'github_set_repo_topics',
       'github_set_repo_variable',
       'github_star_repo',
@@ -557,6 +559,7 @@ describe('stage 14 tools', () => {
       { name: 'github_delete_repo_variable', args: { owner: 'a', repo: 'b', name: 'FOO' } },
       { name: 'github_list_repo_secrets', args: { owner: 'a', repo: 'b' } },
       { name: 'github_delete_repo_secret', args: { owner: 'a', repo: 'b', name: 'API_KEY' } },
+      { name: 'github_set_repo_secret', args: { owner: 'a', repo: 'b', name: 'API_KEY', value: 'secret' } },
       { name: 'github_set_branch_protection', args: { owner: 'a', repo: 'b', branch: 'main', requiredApprovingReviewCount: 1 } },
       { name: 'github_delete_branch_protection', args: { owner: 'a', repo: 'b', branch: 'main' } },
     ]

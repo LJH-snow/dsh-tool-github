@@ -96,6 +96,7 @@ npm install /path/to/dsh-tool-github
 | `github_set_repo_variable` | 创建/更新 Actions 仓库 variable | 是 |
 | `github_delete_repo_variable` | 删除 Actions 仓库 variable | 是 |
 | `github_list_repo_secrets` | 查看 Actions 仓库 secret 元信息 | 是 |
+| `github_set_repo_secret` | 创建/更新 Actions 仓库 secret（本地加密后上传） | 是 |
 | `github_delete_repo_secret` | 删除 Actions 仓库 secret | 是 |
 | `github_get_branch_protection` | 查询分支保护规则 | 否 |
 | `github_set_branch_protection` | 更新分支保护规则 | 是 |

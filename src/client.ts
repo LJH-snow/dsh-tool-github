@@ -1,4 +1,5 @@
 import { inflateRawSync } from 'node:zlib'
+import sodium from 'libsodium-wrappers'
 
 /** GitHub REST client with injected fetch for testability. */
 
@@ -94,6 +95,12 @@ export interface RepoSecretListResult {
 }
 
 export interface RepoSecretDeleteResult {
+  ok: boolean
+  name?: string
+  reason?: string
+}
+
+export interface RepoSecretWriteResult {
   ok: boolean
   name?: string
   reason?: string
@@ -1204,6 +1211,27 @@ export class GithubClient {
     } catch (error) {
       if (error instanceof GithubError && (error.status === 404 || error.status === 422)) {
         return { ok: false, name, reason: 'Could not delete the repository secret (not found or invalid name).' }
+      }
+      throw error
+    }
+  }
+
+  async setRepoSecret(owner: string, repo: string, name: string, value: string, signal?: AbortSignal): Promise<RepoSecretWriteResult> {
+    try {
+      const publicKey = await this.request<{ key_id: string; key: string }>(
+        `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/actions/secrets/public-key`,
+        { signal },
+      )
+      await sodium.ready
+      const encryptedValue = sodium.crypto_box_seal(value, sodium.from_base64(publicKey.key), 'base64')
+      await this.request<unknown>(
+        `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/actions/secrets/${encodeURIComponent(name)}`,
+        { method: 'PUT', body: { encrypted_value: encryptedValue, key_id: publicKey.key_id }, signal },
+      )
+      return { ok: true, name }
+    } catch (error) {
+      if (error instanceof GithubError && (error.status === 404 || error.status === 422)) {
+        return { ok: false, name, reason: 'Could not create or update the repository secret (not found or invalid input).' }
       }
       throw error
     }

@@ -2480,6 +2480,46 @@ export function createTools(client: GithubClient) {
     }),
 
     defineTool({
+      name: 'github_set_repo_secret',
+      description: 'Create or update a GitHub Actions repository secret. WRITE operation: requires a token; the value is encrypted locally before upload.',
+      parameters: {
+        owner: { type: 'string', required: true, description: 'Repository owner' },
+        repo: { type: 'string', required: true, description: 'Repository name' },
+        name: { type: 'string', required: true, description: 'Secret name, e.g. API_KEY' },
+        value: { type: 'string', required: true, description: 'Secret value. Never log or expose this value.' },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            ok: { type: 'boolean', description: 'Whether the secret was saved' },
+            name: { type: 'string', description: 'Secret name' },
+            reason: { type: 'string', description: 'Explanation when not saved' },
+          },
+        },
+        render: (_args, value) => {
+          if (value.ok) return [{ type: 'text', text: `Saved secret ${value.name}` }]
+          return [{ type: 'text', text: `Could not save secret ${value.name}: ${value.reason}` }]
+        },
+      },
+      presentCall(args): ToolCallView {
+        return { card: 'generic', title: `Save secret ${args.name}`, kind: 'edit' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { ok?: boolean; name?: string; reason?: string }
+        if (v.ok) return { card: 'generic', title: `Secret ${v.name} saved` }
+        return { card: 'generic', title: 'Save secret failed', content: [{ type: 'text', text: v.reason ?? 'Unknown' }] }
+      },
+      async execute(args, exec) {
+        if (!client.hasToken()) {
+          return { ok: false, name: args.name as string, reason: 'Setting a repository secret requires a GitHub token. Configure the plugin with a token.' }
+        }
+        return client.setRepoSecret(args.owner as string, args.repo as string, args.name as string, args.value as string, exec.signal)
+      },
+    }),
+
+    defineTool({
       name: 'github_get_branch_protection',
       description: 'Get branch protection rules for a GitHub branch: status checks, review requirements, admins, force pushes, deletions, and linear history.',
       parameters: {

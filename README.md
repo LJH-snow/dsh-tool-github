@@ -94,6 +94,7 @@ Full example: [examples/cordis.yml](examples/cordis.yml).
 | `github_set_repo_variable` | Create or update an Actions repository variable | yes |
 | `github_delete_repo_variable` | Delete an Actions repository variable | yes |
 | `github_list_repo_secrets` | List Actions repository secret metadata | yes |
+| `github_set_repo_secret` | Create/update a repository secret with local encryption | yes |
 | `github_delete_repo_secret` | Delete an Actions repository secret | yes |
 | `github_get_branch_protection` | Read branch protection rules | no |
 | `github_set_branch_protection` | Update branch protection rules | yes |
