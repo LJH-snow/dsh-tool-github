@@ -16,6 +16,7 @@ const tools = () => Object.fromEntries(createTools(new GithubClient({ fetchImpl:
 describe('tool definitions', () => {
   it('registers the planned tools', () => {
     expect(Object.keys(tools()).sort()).toEqual([
+      'github_add_issue_assignees',
       'github_cancel_workflow_run',
       'github_comment_issue',
       'github_create_branch',
@@ -43,6 +44,7 @@ describe('tool definitions', () => {
       'github_list_gists',
       'github_list_issue_comments',
       'github_list_issues',
+      'github_list_milestones',
       'github_list_pr_comments',
       'github_list_prs',
       'github_list_pull_request_reviews',
@@ -54,11 +56,14 @@ describe('tool definitions', () => {
       'github_list_workflow_runs',
       'github_list_workflows',
       'github_merge_pr',
+      'github_reply_pr_comment',
       'github_request_pr_reviewers',
       'github_rerun_workflow_run',
       'github_search_code',
       'github_search_repos',
       'github_set_branch_protection',
+      'github_set_issue_labels',
+      'github_set_issue_milestone',
       'github_set_repo_secret',
       'github_set_repo_topics',
       'github_set_repo_variable',
@@ -159,9 +164,10 @@ describe('tool presentation (pure render intents)', () => {
 })
 
 describe('extended tools (stage 5)', () => {
-  it('registers all thirty-seven tools', () => {
+  it('registers the full tool set', () => {
     const names = Object.keys(Object.fromEntries(createTools(new GithubClient()).map(t => [t.name, t]))).sort()
     expect(names).toEqual([
+      'github_add_issue_assignees',
       'github_cancel_workflow_run',
       'github_comment_issue',
       'github_create_branch',
@@ -189,6 +195,7 @@ describe('extended tools (stage 5)', () => {
       'github_list_gists',
       'github_list_issue_comments',
       'github_list_issues',
+      'github_list_milestones',
       'github_list_pr_comments',
       'github_list_prs',
       'github_list_pull_request_reviews',
@@ -200,11 +207,14 @@ describe('extended tools (stage 5)', () => {
       'github_list_workflow_runs',
       'github_list_workflows',
       'github_merge_pr',
+      'github_reply_pr_comment',
       'github_request_pr_reviewers',
       'github_rerun_workflow_run',
       'github_search_code',
       'github_search_repos',
       'github_set_branch_protection',
+      'github_set_issue_labels',
+      'github_set_issue_milestone',
       'github_set_repo_secret',
       'github_set_repo_topics',
       'github_set_repo_variable',
@@ -596,5 +606,74 @@ describe('stage 14 tools', () => {
     expect(defs['github_list_repo_secrets'].presentCall({ owner: 'a', repo: 'b' })).toMatchObject({ kind: 'search' })
     expect(defs['github_get_branch_protection'].presentCall({ owner: 'a', repo: 'b', branch: 'main' })).toMatchObject({ kind: 'read' })
     expect(defs['github_set_branch_protection'].presentCall({ owner: 'a', repo: 'b', branch: 'main', requiredApprovingReviewCount: 1 })).toMatchObject({ kind: 'edit' })
+  })
+})
+
+describe('stage 15 tools', () => {
+  it('github_list_milestones reads without a token and clamps limit', async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse(200, []))
+    const tool = createTools(new GithubClient({ fetchImpl })).find(t => t.name === 'github_list_milestones')!
+    expect(await tool.execute({ owner: 'a', repo: 'b', limit: 99 }, exec())).toEqual({ items: [] })
+    const [url] = fetchImpl.mock.calls[0] as [string]
+    expect(url).toContain('per_page=50')
+  })
+
+  it('write tools require a token', async () => {
+    const noToken = Object.fromEntries(createTools(new GithubClient({ fetchImpl: vi.fn() })).map(t => [t.name, t]))
+    const cases: Array<{ name: string; args: Record<string, unknown> }> = [
+      { name: 'github_set_issue_labels', args: { owner: 'a', repo: 'b', issueNumber: 8, labels: ['bug'] } },
+      { name: 'github_add_issue_assignees', args: { owner: 'a', repo: 'b', issueNumber: 8, assignees: ['alice'] } },
+      { name: 'github_set_issue_milestone', args: { owner: 'a', repo: 'b', issueNumber: 8, milestoneNumber: 3 } },
+      { name: 'github_reply_pr_comment', args: { owner: 'a', repo: 'b', prNumber: 8, commentId: 12, body: 'Thanks' } },
+    ]
+    for (const { name, args } of cases) {
+      const result = await noToken[name].execute(args, exec()) as Record<string, unknown>
+      expect(result.ok).toBe(false)
+      expect(result.reason).toContain('token')
+    }
+  })
+
+  it('write tools validate required issue inputs with a token', async () => {
+    const fetchImpl = vi.fn()
+    const defs = Object.fromEntries(createTools(new GithubClient({ token: 'ghp_test', fetchImpl })).map(t => [t.name, t]))
+    const milestone = await defs['github_set_issue_milestone'].execute({ owner: 'a', repo: 'b', issueNumber: 8 }, exec())
+    expect(milestone).toMatchObject({ ok: false })
+    expect(milestone.reason).toContain('milestoneNumber')
+
+    const assignees = await defs['github_add_issue_assignees'].execute({ owner: 'a', repo: 'b', issueNumber: 8, assignees: [] }, exec())
+    expect(assignees).toMatchObject({ ok: false })
+    expect(assignees.reason).toContain('assignee')
+    expect(fetchImpl).not.toHaveBeenCalled()
+  })
+
+  it('write tools pass through with a token', async () => {
+    const labelFetch = vi.fn(async () => jsonResponse(200, { number: 8, labels: [{ name: 'bug' }] }))
+    const labelTool = createTools(new GithubClient({ token: 'ghp_test', fetchImpl: labelFetch })).find(t => t.name === 'github_set_issue_labels')!
+    expect(await labelTool.execute({ owner: 'a', repo: 'b', issueNumber: 8, labels: ['bug'] }, exec())).toEqual({ ok: true, number: 8, labels: ['bug'] })
+    expect(JSON.parse(String(labelFetch.mock.calls[0][1]?.body))).toEqual({ labels: ['bug'] })
+
+    const assigneeFetch = vi.fn(async () => jsonResponse(200, { number: 8, assignees: [{ login: 'alice' }] }))
+    const assigneeTool = createTools(new GithubClient({ token: 'ghp_test', fetchImpl: assigneeFetch })).find(t => t.name === 'github_add_issue_assignees')!
+    expect(await assigneeTool.execute({ owner: 'a', repo: 'b', issueNumber: 8, assignees: ['alice'] }, exec())).toEqual({ ok: true, number: 8, assignees: ['alice'] })
+    expect(assigneeFetch.mock.calls[0][0]).toContain('/issues/8/assignees')
+
+    const milestoneFetch = vi.fn(async () => jsonResponse(200, { number: 8, milestone: { number: 3 } }))
+    const milestoneTool = createTools(new GithubClient({ token: 'ghp_test', fetchImpl: milestoneFetch })).find(t => t.name === 'github_set_issue_milestone')!
+    expect(await milestoneTool.execute({ owner: 'a', repo: 'b', issueNumber: 8, milestoneNumber: 3 }, exec())).toEqual({ ok: true, number: 8, milestoneNumber: 3 })
+    expect(JSON.parse(String(milestoneFetch.mock.calls[0][1]?.body))).toEqual({ milestone: 3 })
+
+    const replyFetch = vi.fn(async () => jsonResponse(201, { id: 99, html_url: 'https://github.com/a/b/pull/8#discussion_r99' }))
+    const replyTool = createTools(new GithubClient({ token: 'ghp_test', fetchImpl: replyFetch })).find(t => t.name === 'github_reply_pr_comment')!
+    expect(await replyTool.execute({ owner: 'a', repo: 'b', prNumber: 8, commentId: 12, body: 'Thanks' }, exec())).toEqual({ ok: true, commentId: 99, url: 'https://github.com/a/b/pull/8#discussion_r99' })
+    expect(JSON.parse(String(replyFetch.mock.calls[0][1]?.body))).toEqual({ body: 'Thanks', in_reply_to: 12 })
+  })
+
+  it('presentCall for stage 15 tools', () => {
+    const defs = Object.fromEntries(createTools(new GithubClient()).map(t => [t.name, t])) as any
+    expect(defs['github_list_milestones'].presentCall({ owner: 'a', repo: 'b' })).toMatchObject({ kind: 'search' })
+    expect(defs['github_set_issue_labels'].presentCall({ owner: 'a', repo: 'b', issueNumber: 8, labels: ['bug'] })).toMatchObject({ kind: 'edit' })
+    expect(defs['github_add_issue_assignees'].presentCall({ owner: 'a', repo: 'b', issueNumber: 8, assignees: ['alice'] })).toMatchObject({ kind: 'edit' })
+    expect(defs['github_set_issue_milestone'].presentCall({ owner: 'a', repo: 'b', issueNumber: 8, milestoneNumber: 3 })).toMatchObject({ kind: 'edit' })
+    expect(defs['github_reply_pr_comment'].presentCall({ owner: 'a', repo: 'b', prNumber: 8, commentId: 12, body: 'Thanks' })).toMatchObject({ kind: 'edit' })
   })
 })

@@ -66,7 +66,12 @@ npm install /path/to/dsh-tool-github
 | `github_list_branches` | 列出分支及最新 SHA | 否 |
 | `github_get_issue` | 查看 issue 详情（标题、状态、作者、标签、body） | 否 |
 | `github_list_issue_comments` | 列出 issue 评论（作者、时间、内容） | 否 |
+| `github_list_milestones` | 列出仓库 milestone（状态过滤、截止日期、issue 数量） | 否 |
 | `github_list_pr_comments` | 列出 PR review 评论（作者、时间、内容） | 否 |
+| `github_set_issue_labels` | 覆盖设置 issue/PR 的完整标签列表 | 是 |
+| `github_add_issue_assignees` | 给 issue/PR 添加 GitHub 用户 | 是 |
+| `github_set_issue_milestone` | 设置或清除 issue/PR 的 milestone | 是 |
+| `github_reply_pr_comment` | 回复已有的 PR review 评论 | 是 |
 | `github_get_pull_request` | 查看 PR 详情（分支、合并状态、评审结论、改动统计） | 否 |
 | `github_list_pull_request_reviews` | 列出 PR 评审（评审人、状态、内容、时间） | 否 |
 | `github_request_pr_reviewers` | 邀请用户或团队评审 PR | 是 |

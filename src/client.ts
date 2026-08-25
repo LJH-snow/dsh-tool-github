@@ -237,6 +237,39 @@ export interface IssueWriteResult {
   reason?: string
 }
 
+export interface MilestoneItem {
+  number: number
+  title: string
+  state: string
+  openIssues: number
+  closedIssues: number
+  dueOn: string | null
+  description: string
+  url: string
+}
+
+export interface IssueMetaWriteResult {
+  ok: boolean
+  number?: number
+  labels?: string[]
+  milestoneNumber?: number | null
+  reason?: string
+}
+
+export interface AssigneesWriteResult {
+  ok: boolean
+  number?: number
+  assignees?: string[]
+  reason?: string
+}
+
+export interface PrCommentReplyResult {
+  ok: boolean
+  commentId?: number
+  url?: string
+  reason?: string
+}
+
 export interface ReleaseItem {
   tagName: string
   name: string
@@ -714,6 +747,93 @@ export class GithubClient {
     } catch (error) {
       if (error instanceof GithubError && error.status === 404) {
         return { ok: false, reason: 'Issue not found.' }
+      }
+      throw error
+    }
+  }
+
+  async listMilestones(owner: string, repo: string, options: { state?: 'open' | 'closed' | 'all'; perPage?: number; signal?: AbortSignal } = {}): Promise<MilestoneItem[]> {
+    const params = new URLSearchParams({
+      state: options.state ?? 'open',
+      per_page: String(Math.max(1, Math.min(options.perPage ?? 20, 100))),
+    })
+    const data = await this.request<Array<{
+      number: number
+      title: string
+      state: string
+      open_issues: number
+      closed_issues: number
+      due_on: string | null
+      description: string | null
+      html_url: string
+    }>>(`/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/milestones?${params}`, { signal: options.signal })
+    return data.map(item => ({
+      number: item.number,
+      title: item.title,
+      state: item.state,
+      openIssues: item.open_issues,
+      closedIssues: item.closed_issues,
+      dueOn: item.due_on,
+      description: item.description ?? '',
+      url: item.html_url,
+    }))
+  }
+
+  async setIssueMilestone(owner: string, repo: string, issueNumber: number, input: { milestoneNumber?: number | null; clear?: boolean }, signal?: AbortSignal): Promise<IssueMetaWriteResult> {
+    try {
+      const data = await this.request<{ number: number; milestone: { number: number } | null }>(
+        `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/issues/${issueNumber}`,
+        { method: 'PATCH', body: { milestone: input.clear ? null : input.milestoneNumber ?? null }, signal },
+      )
+      return { ok: true, number: data.number, milestoneNumber: data.milestone?.number ?? null }
+    } catch (error) {
+      if (error instanceof GithubError && (error.status === 404 || error.status === 422)) {
+        return { ok: false, number: issueNumber, reason: 'Could not set the issue milestone (not found or invalid milestone).' }
+      }
+      throw error
+    }
+  }
+
+  async setIssueLabels(owner: string, repo: string, issueNumber: number, labels: string[], signal?: AbortSignal): Promise<IssueMetaWriteResult> {
+    try {
+      const data = await this.request<{ number: number; labels: Array<{ name: string }> }>(
+        `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/issues/${issueNumber}`,
+        { method: 'PATCH', body: { labels }, signal },
+      )
+      return { ok: true, number: data.number, labels: data.labels.map(label => label.name) }
+    } catch (error) {
+      if (error instanceof GithubError && (error.status === 404 || error.status === 422)) {
+        return { ok: false, number: issueNumber, reason: 'Could not set the issue labels (not found or invalid label).' }
+      }
+      throw error
+    }
+  }
+
+  async addIssueAssignees(owner: string, repo: string, issueNumber: number, assignees: string[], signal?: AbortSignal): Promise<AssigneesWriteResult> {
+    try {
+      const data = await this.request<{ number: number; assignees: Array<{ login: string }> }>(
+        `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/issues/${issueNumber}/assignees`,
+        { method: 'POST', body: { assignees }, signal },
+      )
+      return { ok: true, number: data.number, assignees: data.assignees.map(assignee => assignee.login) }
+    } catch (error) {
+      if (error instanceof GithubError && (error.status === 404 || error.status === 422)) {
+        return { ok: false, number: issueNumber, reason: 'Could not add issue assignees (not found or invalid assignee).' }
+      }
+      throw error
+    }
+  }
+
+  async replyPrComment(owner: string, repo: string, prNumber: number, input: { commentId: number; body: string }, signal?: AbortSignal): Promise<PrCommentReplyResult> {
+    try {
+      const data = await this.request<{ id: number; html_url: string }>(
+        `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/pulls/${prNumber}/comments`,
+        { method: 'POST', body: { body: input.body, in_reply_to: input.commentId }, signal },
+      )
+      return { ok: true, commentId: data.id, url: data.html_url }
+    } catch (error) {
+      if (error instanceof GithubError && (error.status === 404 || error.status === 422)) {
+        return { ok: false, commentId: input.commentId, reason: 'Could not reply to the PR review comment (not found or invalid reply).' }
       }
       throw error
     }

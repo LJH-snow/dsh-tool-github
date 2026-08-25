@@ -64,7 +64,12 @@ Full example: [examples/cordis.yml](examples/cordis.yml).
 | `github_list_branches` | List branches with latest SHAs | no |
 | `github_get_issue` | Get issue details (title, state, author, labels, body) | no |
 | `github_list_issue_comments` | List issue comments (author, time, body) | no |
+| `github_list_milestones` | List repository milestones (state filter, due dates, issue counts) | no |
 | `github_list_pr_comments` | List PR review comments (author, time, body) | no |
+| `github_set_issue_labels` | Replace all labels on an issue or PR | yes |
+| `github_add_issue_assignees` | Assign GitHub users to an issue or PR | yes |
+| `github_set_issue_milestone` | Set or clear the milestone on an issue or PR | yes |
+| `github_reply_pr_comment` | Reply to an existing PR review comment | yes |
 | `github_get_pull_request` | Get PR details (branches, merge state, review decision, diff stats) | no |
 | `github_list_pull_request_reviews` | List PR reviews (reviewer, state, body, time) | no |
 | `github_request_pr_reviewers` | Request user or team reviewers on a PR | yes |

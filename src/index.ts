@@ -2678,5 +2678,244 @@ export function createTools(client: GithubClient) {
         return client.deleteBranchProtection(args.owner as string, args.repo as string, args.branch as string, exec.signal)
       },
     }),
+
+    defineTool({
+      name: 'github_list_milestones',
+      description: 'List milestones in a GitHub repository: title, state, open/closed issue counts, due date, and URL.',
+      parameters: {
+        owner: { type: 'string', required: true, description: 'Repository owner' },
+        repo: { type: 'string', required: true, description: 'Repository name' },
+        state: { type: 'string', enum: ['open', 'closed', 'all'], description: 'Milestone state (default open)' },
+        limit: { type: 'integer', description: 'Maximum results, 1-50 (default 20)' },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            items: {
+              type: 'array',
+              items: {
+                type: 'object',
+                additionalProperties: false,
+                properties: {
+                  number: { type: 'integer', description: 'Milestone number' },
+                  title: { type: 'string', description: 'Milestone title' },
+                  state: { type: 'string', description: 'Milestone state' },
+                  openIssues: { type: 'integer', description: 'Open issue count' },
+                  closedIssues: { type: 'integer', description: 'Closed issue count' },
+                  dueOn: { oneOf: [{ type: 'string' }, { type: 'null' }], description: 'ISO due date' },
+                  description: { type: 'string', description: 'Milestone description' },
+                  url: { type: 'string', description: 'Milestone URL' },
+                },
+              },
+            },
+          },
+        },
+        render: (_args, value) => {
+          const items = value.items ?? []
+          if (items.length === 0) return [{ type: 'text', text: 'No milestones found.' }]
+          const lines = items.map(item => `${item.title} (#${item.number}, ${item.openIssues} open / ${item.closedIssues} closed, due ${item.dueOn ?? 'n/a'})`)
+          return [{ type: 'text', text: lines.join('\n') }]
+        },
+      },
+      presentCall(args): ToolCallView {
+        return { card: 'generic', title: `Milestones: ${args.owner}/${args.repo}`, kind: 'search' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { items?: Array<{ title: string; openIssues: number; closedIssues: number }> }
+        const items = v.items ?? []
+        if (items.length === 0) return { card: 'generic', title: 'No milestones' }
+        return {
+          card: 'generic',
+          title: `${items.length} milestone(s)`,
+          content: [{ type: 'text', text: items.map(i => `${i.title} (${i.openIssues}/${i.closedIssues})`).join('\n') }],
+        }
+      },
+      async execute(args, exec) {
+        const limit = args.limit === undefined ? 20 : Math.max(1, Math.min(args.limit as number, 50))
+        const items = await client.listMilestones(args.owner as string, args.repo as string, {
+          state: args.state as 'open' | 'closed' | 'all' | undefined,
+          perPage: limit,
+          signal: exec.signal,
+        })
+        return { items }
+      },
+    }),
+
+    defineTool({
+      name: 'github_set_issue_labels',
+      description: 'Set the complete label list on a GitHub issue or PR. WRITE operation: requires a token and overwrites existing labels.',
+      parameters: {
+        owner: { type: 'string', required: true, description: 'Repository owner' },
+        repo: { type: 'string', required: true, description: 'Repository name' },
+        issueNumber: { type: 'integer', required: true, description: 'Issue or PR number' },
+        labels: { type: 'array', items: { type: 'string' }, required: true, description: 'Complete label names list (empty clears labels)' },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            ok: { type: 'boolean', description: 'Whether labels were updated' },
+            number: { type: 'integer', description: 'Issue or PR number' },
+            labels: { type: 'array', items: { type: 'string' }, description: 'Labels now applied' },
+            reason: { type: 'string', description: 'Explanation when not updated' },
+          },
+        },
+        render: (_args, value) => {
+          if (value.ok) return [{ type: 'text', text: `Labels for #${value.number}: ${(value.labels ?? []).join(', ') || 'none'}` }]
+          return [{ type: 'text', text: `Could not set labels on #${value.number}: ${value.reason}` }]
+        },
+      },
+      presentCall(args): ToolCallView {
+        return { card: 'generic', title: `Set labels on #${args.issueNumber}`, kind: 'edit' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { ok?: boolean; number?: number; labels?: string[]; reason?: string }
+        if (v.ok) return { card: 'generic', title: `Labels updated on #${v.number}`, content: [{ type: 'text', text: (v.labels ?? []).join(', ') || 'none' }] }
+        return { card: 'generic', title: 'Set labels failed', content: [{ type: 'text', text: v.reason ?? 'Unknown' }] }
+      },
+      async execute(args, exec) {
+        if (!client.hasToken()) {
+          return { ok: false, number: args.issueNumber as number, reason: 'Setting issue labels requires a GitHub token. Configure the plugin with a token.' }
+        }
+        return client.setIssueLabels(args.owner as string, args.repo as string, args.issueNumber as number, (args.labels as string[]) ?? [], exec.signal)
+      },
+    }),
+
+    defineTool({
+      name: 'github_add_issue_assignees',
+      description: 'Assign GitHub users to an issue or pull request. WRITE operation: requires a token.',
+      parameters: {
+        owner: { type: 'string', required: true, description: 'Repository owner' },
+        repo: { type: 'string', required: true, description: 'Repository name' },
+        issueNumber: { type: 'integer', required: true, description: 'Issue or PR number' },
+        assignees: { type: 'array', items: { type: 'string' }, required: true, description: 'GitHub usernames to assign' },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            ok: { type: 'boolean', description: 'Whether assignees were added' },
+            number: { type: 'integer', description: 'Issue or PR number' },
+            assignees: { type: 'array', items: { type: 'string' }, description: 'Assignees now on the issue' },
+            reason: { type: 'string', description: 'Explanation when not assigned' },
+          },
+        },
+        render: (_args, value) => {
+          if (value.ok) return [{ type: 'text', text: `Assigned to #${value.number}: ${(value.assignees ?? []).join(', ')}` }]
+          return [{ type: 'text', text: `Could not assign #${value.number}: ${value.reason}` }]
+        },
+      },
+      presentCall(args): ToolCallView {
+        return { card: 'generic', title: `Assign #${args.issueNumber}`, kind: 'edit' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { ok?: boolean; number?: number; assignees?: string[]; reason?: string }
+        if (v.ok) return { card: 'generic', title: `Assigned #${v.number}`, content: [{ type: 'text', text: (v.assignees ?? []).join(', ') }] }
+        return { card: 'generic', title: 'Assign failed', content: [{ type: 'text', text: v.reason ?? 'Unknown' }] }
+      },
+      async execute(args, exec) {
+        if (!client.hasToken()) {
+          return { ok: false, number: args.issueNumber as number, reason: 'Assigning an issue requires a GitHub token. Configure the plugin with a token.' }
+        }
+        const assignees = (args.assignees as string[]) ?? []
+        if (assignees.length === 0) {
+          return { ok: false, number: args.issueNumber as number, reason: 'Provide at least one assignee.' }
+        }
+        return client.addIssueAssignees(args.owner as string, args.repo as string, args.issueNumber as number, assignees, exec.signal)
+      },
+    }),
+
+    defineTool({
+      name: 'github_set_issue_milestone',
+      description: 'Set or clear the milestone on a GitHub issue or PR. WRITE operation: requires a token.',
+      parameters: {
+        owner: { type: 'string', required: true, description: 'Repository owner' },
+        repo: { type: 'string', required: true, description: 'Repository name' },
+        issueNumber: { type: 'integer', required: true, description: 'Issue or PR number' },
+        milestoneNumber: { type: 'integer', description: 'Milestone number to set' },
+        clear: { type: 'boolean', description: 'Clear the current milestone (default false)' },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            ok: { type: 'boolean', description: 'Whether the milestone was updated' },
+            number: { type: 'integer', description: 'Issue or PR number' },
+            milestoneNumber: { oneOf: [{ type: 'integer' }, { type: 'null' }], description: 'Milestone now set on the issue' },
+            reason: { type: 'string', description: 'Explanation when not updated' },
+          },
+        },
+        render: (_args, value) => {
+          if (value.ok) return [{ type: 'text', text: `Milestone on #${value.number}: ${value.milestoneNumber ?? 'none'}` }]
+          return [{ type: 'text', text: `Could not set milestone on #${value.number}: ${value.reason}` }]
+        },
+      },
+      presentCall(args): ToolCallView {
+        return { card: 'generic', title: `Set milestone on #${args.issueNumber}`, kind: 'edit' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { ok?: boolean; number?: number; milestoneNumber?: number | null; reason?: string }
+        if (v.ok) return { card: 'generic', title: `Milestone updated on #${v.number}`, content: [{ type: 'text', text: v.milestoneNumber?.toString() ?? 'none' }] }
+        return { card: 'generic', title: 'Set milestone failed', content: [{ type: 'text', text: v.reason ?? 'Unknown' }] }
+      },
+      async execute(args, exec) {
+        if (!client.hasToken()) {
+          return { ok: false, number: args.issueNumber as number, reason: 'Setting an issue milestone requires a GitHub token. Configure the plugin with a token.' }
+        }
+        const milestoneNumber = args.milestoneNumber as number | undefined
+        const clear = Boolean(args.clear)
+        if (!clear && milestoneNumber === undefined) {
+          return { ok: false, number: args.issueNumber as number, reason: 'Provide milestoneNumber or set clear=true.' }
+        }
+        return client.setIssueMilestone(args.owner as string, args.repo as string, args.issueNumber as number, { milestoneNumber, clear }, exec.signal)
+      },
+    }),
+
+    defineTool({
+      name: 'github_reply_pr_comment',
+      description: 'Reply to an existing pull request review comment. WRITE operation: requires a token.',
+      parameters: {
+        owner: { type: 'string', required: true, description: 'Repository owner' },
+        repo: { type: 'string', required: true, description: 'Repository name' },
+        prNumber: { type: 'integer', required: true, description: 'Pull request number' },
+        commentId: { type: 'integer', required: true, description: 'Parent review comment id' },
+        body: { type: 'string', required: true, description: 'Reply body (Markdown)' },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            ok: { type: 'boolean', description: 'Whether the reply was posted' },
+            commentId: { type: 'integer', description: 'New comment id' },
+            url: { type: 'string', description: 'New comment URL' },
+            reason: { type: 'string', description: 'Explanation when not posted' },
+          },
+        },
+        render: (_args, value) => {
+          if (value.ok) return [{ type: 'text', text: `Replied to PR comment: ${value.url}` }]
+          return [{ type: 'text', text: `Could not reply to PR comment #${value.commentId}: ${value.reason}` }]
+        },
+      },
+      presentCall(args): ToolCallView {
+        return { card: 'generic', title: `Reply to PR comment #${args.commentId}`, kind: 'edit' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { ok?: boolean; commentId?: number; url?: string; reason?: string }
+        if (v.ok) return { card: 'generic', title: `PR comment reply #${v.commentId}`, content: [{ type: 'text', text: v.url ?? '' }] }
+        return { card: 'generic', title: 'Reply failed', content: [{ type: 'text', text: v.reason ?? 'Unknown' }] }
+      },
+      async execute(args, exec) {
+        if (!client.hasToken()) {
+          return { ok: false, commentId: args.commentId as number, reason: 'Replying to a PR comment requires a GitHub token. Configure the plugin with a token.' }
+        }
+        return client.replyPrComment(args.owner as string, args.repo as string, args.prNumber as number, { commentId: args.commentId as number, body: args.body as string }, exec.signal)
+      },
+    }),
   ]
 }

@@ -257,7 +257,31 @@ v0.8 方向：从「查看/重跑/取消 CI」继续推进到「能主动触发 
 
 - 验收（阶段 12 完成）：typecheck ✅；110/110 单测（含 204 dispatch、inputs 映射、仓库/gist/治理错误路径、secret 加密、无 token、presentCall）。
 
+### 阶段 13：Issue/PR 工作台（2026-08-25 新增）
+
+v0.9 方向：从「能看/能创建」推进到「能整理 issue/PR 的元数据」，让 Agent 可以管理 milestone、标签、指派人和 PR review 评论回复。
+
+| 工具 | 功能 | 需 token | 状态 |
+|---|---|---|---|
+| `github_list_milestones` | 列出仓库 milestone（state/per_page，映射开启/关闭 issue 数与截止日期） | 否 | ✅ 已实现 |
+| `github_set_issue_labels` | 覆盖式设置 issue/PR 完整标签列表（空列表清除） | 是 | ✅ 已实现 |
+| `github_add_issue_assignees` | 给 issue/PR 添加 assignees（至少一个） | 是 | ✅ 已实现 |
+| `github_set_issue_milestone` | 设置或清除 issue/PR milestone（缺少 milestoneNumber 且未 clear 时返回业务错误） | 是 | ✅ 已实现 |
+| `github_reply_pr_comment` | 回复 PR review comment（POST `in_reply_to`） | 是 | ✅ 已实现 |
+
+- 写工具无 token 返回 `{ ok: false, reason: '... token ...' }` 业务值；404/422 尽量映射为业务失败值；401/403 仍抛基础设施错误。
+- 验收：typecheck ✅；120/120 单测（含 milestones 查询映射、PATCH/POST body 断言、404/422、无 token、空输入校验、presentCall）。
+
 ## 5. 开发日志（每次推进后追加，带时间戳）
+
+### 2026-08-25（阶段 13：Issue/PR 工作台完成，共 56 个工具）
+- 新增 `github_list_milestones`：GET `/repos/{owner}/{repo}/milestones`，支持 state/per_page，映射开启/关闭 issue 数、截止日期、描述与 URL。
+- 新增 `github_set_issue_labels`：PATCH `/issues/{issue_number}`，覆盖式设置完整 labels（空数组清除）。
+- 新增 `github_add_issue_assignees`：POST `/issues/{issue_number}/assignees`，至少提供一个 assignee。
+- 新增 `github_set_issue_milestone`：PATCH `/issues/{issue_number}`，支持设置 number 或 `clear: true` 清除；两者都未提供时返回业务错误。
+- 新增 `github_reply_pr_comment`：POST `/pulls/{pull_number}/comments`，body 使用 `in_reply_to` 关联父评论。
+- 测试：client +5（milestones 查询映射、milestone 设置/清除/404/422、labels 覆盖、assignees POST、PR 评论回复），tools +5（milestones 免 token/limit、无 token、空输入校验、带 token 传参、presentCall）；共 120/120 通过。
+- 验证：typecheck ✅、vitest 120/120 ✅、build ✅；README 中英文工具表同步（56 工具）。
 
 ### 2026-08-25（阶段 12：Actions 触发与仓库治理开始）
 - 新增 `github_dispatch_workflow`：POST `actions/workflows/{id}/dispatches`，支持 `ref` 和字符串 inputs；inputs 在工具层使用 `name/value` 数组呈现，客户端转为 GitHub API 的 `{ inputs: { name: value } }` 对象；204 空响应兼容；404/422 → 业务失败值。

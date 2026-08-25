@@ -808,3 +808,102 @@ describe('GithubClient stage 14', () => {
     expect(sodium.crypto_box_seal_open(sodium.from_base64(body.encrypted_value), keyPair.publicKey, keyPair.privateKey, 'text')).toBe('super-secret')
   })
 })
+
+describe('GithubClient stage 15', () => {
+  it('listMilestones builds the query and maps items', async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse(200, [
+      {
+        number: 3,
+        title: 'v1',
+        state: 'open',
+        open_issues: 2,
+        closed_issues: 5,
+        due_on: '2026-09-01T00:00:00Z',
+        description: null,
+        html_url: 'https://github.com/a/b/milestone/3',
+      },
+    ]))
+    const client = new GithubClient({ fetchImpl })
+    const result = await client.listMilestones('a', 'b', { state: 'all', perPage: 50 })
+    expect(result).toEqual([{
+      number: 3,
+      title: 'v1',
+      state: 'open',
+      openIssues: 2,
+      closedIssues: 5,
+      dueOn: '2026-09-01T00:00:00Z',
+      description: '',
+      url: 'https://github.com/a/b/milestone/3',
+    }])
+    const [url] = fetchImpl.mock.calls[0] as [string]
+    expect(url).toContain('/repos/a/b/milestones?')
+    expect(url).toContain('state=all')
+    expect(url).toContain('per_page=50')
+  })
+
+  it('setIssueMilestone PATCHes the number, clears with null, and maps 404/422', async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse(200, { number: 8, milestone: { number: 3 } }))
+    const client = new GithubClient({ token: 'ghp_test', fetchImpl })
+    const result = await client.setIssueMilestone('a', 'b', 8, { milestoneNumber: 3 })
+    const [url, init] = fetchImpl.mock.calls[0] as [string, RequestInit]
+    expect(url).toContain('/repos/a/b/issues/8')
+    expect(init.method).toBe('PATCH')
+    expect(JSON.parse(String(init.body))).toEqual({ milestone: 3 })
+    expect(result).toEqual({ ok: true, number: 8, milestoneNumber: 3 })
+
+    const clearFetch = vi.fn(async () => jsonResponse(200, { number: 8, milestone: null }))
+    const clearClient = new GithubClient({ token: 'ghp_test', fetchImpl: clearFetch })
+    const cleared = await clearClient.setIssueMilestone('a', 'b', 8, { clear: true })
+    const [, clearInit] = clearFetch.mock.calls[0] as [string, RequestInit]
+    expect(JSON.parse(String(clearInit.body))).toEqual({ milestone: null })
+    expect(cleared).toEqual({ ok: true, number: 8, milestoneNumber: null })
+
+    for (const status of [404, 422]) {
+      const failed = new GithubClient({ token: 'ghp_test', fetchImpl: vi.fn(async () => jsonResponse(status, {})) })
+      expect((await failed.setIssueMilestone('a', 'b', 8, { milestoneNumber: 9 })).ok).toBe(false)
+    }
+  })
+
+  it('setIssueLabels PATCHes the complete label list and maps errors', async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse(200, { number: 8, labels: [{ name: 'bug' }, { name: 'agent' }] }))
+    const client = new GithubClient({ token: 'ghp_test', fetchImpl })
+    const result = await client.setIssueLabels('a', 'b', 8, ['bug', 'agent'])
+    const [, init] = fetchImpl.mock.calls[0] as [string, RequestInit]
+    expect(init.method).toBe('PATCH')
+    expect(JSON.parse(String(init.body))).toEqual({ labels: ['bug', 'agent'] })
+    expect(result).toEqual({ ok: true, number: 8, labels: ['bug', 'agent'] })
+
+    const failed = new GithubClient({ token: 'ghp_test', fetchImpl: vi.fn(async () => jsonResponse(422, {})) })
+    expect((await failed.setIssueLabels('a', 'b', 8, ['nope'])).ok).toBe(false)
+  })
+
+  it('addIssueAssignees POSTs to the assignees endpoint', async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse(200, { number: 8, assignees: [{ login: 'alice' }] }))
+    const client = new GithubClient({ token: 'ghp_test', fetchImpl })
+    const result = await client.addIssueAssignees('a', 'b', 8, ['alice'])
+    const [url, init] = fetchImpl.mock.calls[0] as [string, RequestInit]
+    expect(url).toContain('/repos/a/b/issues/8/assignees')
+    expect(init.method).toBe('POST')
+    expect(JSON.parse(String(init.body))).toEqual({ assignees: ['alice'] })
+    expect(result).toEqual({ ok: true, number: 8, assignees: ['alice'] })
+
+    const failed = new GithubClient({ token: 'ghp_test', fetchImpl: vi.fn(async () => jsonResponse(404, {})) })
+    expect((await failed.addIssueAssignees('a', 'b', 8, ['nobody'])).ok).toBe(false)
+  })
+
+  it('replyPrComment POSTs the reply with in_reply_to and maps errors', async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse(201, { id: 99, html_url: 'https://github.com/a/b/pull/8#discussion_r99' }))
+    const client = new GithubClient({ token: 'ghp_test', fetchImpl })
+    const result = await client.replyPrComment('a', 'b', 8, { commentId: 12, body: 'Thanks' })
+    const [url, init] = fetchImpl.mock.calls[0] as [string, RequestInit]
+    expect(url).toContain('/repos/a/b/pulls/8/comments')
+    expect(init.method).toBe('POST')
+    expect(JSON.parse(String(init.body))).toEqual({ body: 'Thanks', in_reply_to: 12 })
+    expect(result).toEqual({ ok: true, commentId: 99, url: 'https://github.com/a/b/pull/8#discussion_r99' })
+
+    for (const status of [404, 422]) {
+      const failed = new GithubClient({ token: 'ghp_test', fetchImpl: vi.fn(async () => jsonResponse(status, {})) })
+      expect((await failed.replyPrComment('a', 'b', 8, { commentId: 12, body: 'x' })).ok).toBe(false)
+    }
+  })
+})
