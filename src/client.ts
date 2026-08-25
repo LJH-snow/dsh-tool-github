@@ -451,6 +451,60 @@ export interface EnvironmentWriteResult {
   reason?: string
 }
 
+export interface OrgInfo {
+  login: string
+  name: string | null
+  description: string | null
+  publicRepos: number
+  totalPrivateRepos: number | null
+  location: string | null
+  blog: string | null
+  createdAt: string | null
+  url: string
+}
+
+export interface OrgRepoItem {
+  fullName: string
+  owner: string
+  name: string
+  description: string | null
+  stars: number
+  language: string | null
+  visibility: string | null
+  fork: boolean
+  privateRepo: boolean
+  updatedAt: string
+  url: string
+}
+
+export interface OrgMemberItem {
+  login: string
+  id: number
+  avatarUrl: string
+  url: string
+}
+
+export interface TeamItem {
+  id: number
+  name: string
+  slug: string
+  description: string | null
+  privacy: string
+  permission: string
+  url: string
+  htmlUrl: string
+  membersCount: number | null
+  reposCount: number | null
+}
+
+export interface TeamMembershipResult {
+  ok: boolean
+  username?: string
+  role?: string
+  state?: string
+  reason?: string
+}
+
 export interface BranchCreateResult {
   ok: boolean
   name?: string
@@ -626,6 +680,83 @@ function mapEnvironment(raw: RawEnvironment): EnvironmentItem {
     })),
     protectedBranches: raw.deployment_branch_policy?.protected_branches ?? null,
     customBranchPolicies: raw.deployment_branch_policy?.custom_branch_policies ?? null,
+  }
+}
+
+interface RawOrg {
+  login: string
+  name: string | null
+  description: string | null
+  public_repos: number
+  total_private_repos?: number | null
+  location: string | null
+  blog: string | null
+  created_at: string | null
+  html_url: string
+}
+
+interface RawOrgRepo {
+  full_name: string
+  name: string
+  description: string | null
+  stargazers_count: number
+  language: string | null
+  visibility: string | null
+  fork: boolean
+  private: boolean
+  updated_at: string
+  html_url: string
+}
+
+interface RawOrgMember {
+  login: string
+  id: number
+  avatar_url: string
+  html_url: string
+}
+
+interface RawTeam {
+  id: number
+  name: string
+  slug: string
+  description: string | null
+  privacy: string
+  permission: string
+  url: string
+  html_url: string
+  members_count?: number | null
+  repos_count?: number | null
+}
+
+function mapOrgRepo(raw: RawOrgRepo): OrgRepoItem {
+  const [owner, name] = raw.full_name.split('/')
+  return {
+    fullName: raw.full_name,
+    owner,
+    name,
+    description: raw.description,
+    stars: raw.stargazers_count,
+    language: raw.language,
+    visibility: raw.visibility,
+    fork: raw.fork,
+    privateRepo: raw.private,
+    updatedAt: raw.updated_at,
+    url: raw.html_url,
+  }
+}
+
+function mapTeam(raw: RawTeam): TeamItem {
+  return {
+    id: raw.id,
+    name: raw.name,
+    slug: raw.slug,
+    description: raw.description,
+    privacy: raw.privacy,
+    permission: raw.permission,
+    url: raw.url,
+    htmlUrl: raw.html_url,
+    membersCount: raw.members_count ?? null,
+    reposCount: raw.repos_count ?? null,
   }
 }
 
@@ -1263,6 +1394,127 @@ export class GithubClient {
       location: data.location,
       blog: data.blog,
       url: data.html_url,
+    }
+  }
+
+  async getOrg(org: string, signal?: AbortSignal): Promise<OrgInfo> {
+    const data = await this.request<RawOrg>(`/orgs/${encodeURIComponent(org)}`, { signal })
+    return {
+      login: data.login,
+      name: data.name,
+      description: data.description,
+      publicRepos: data.public_repos,
+      totalPrivateRepos: data.total_private_repos ?? null,
+      location: data.location,
+      blog: data.blog,
+      createdAt: data.created_at,
+      url: data.html_url,
+    }
+  }
+
+  async listOrgRepos(org: string, options: { type?: 'all' | 'public' | 'private' | 'forks' | 'sources' | 'member'; perPage?: number; signal?: AbortSignal } = {}): Promise<OrgRepoItem[]> {
+    const params = new URLSearchParams({
+      type: options.type ?? 'all',
+      per_page: String(Math.max(1, Math.min(options.perPage ?? 30, 100))),
+    })
+    const data = await this.request<RawOrgRepo[]>(
+      `/orgs/${encodeURIComponent(org)}/repos?${params}`,
+      { signal: options.signal },
+    )
+    return data.map(mapOrgRepo)
+  }
+
+  async listOrgMembers(org: string, options: { role?: 'all' | 'admin' | 'member'; perPage?: number; signal?: AbortSignal } = {}): Promise<OrgMemberItem[]> {
+    const params = new URLSearchParams({
+      role: options.role ?? 'all',
+      per_page: String(Math.max(1, Math.min(options.perPage ?? 30, 100))),
+    })
+    const data = await this.request<RawOrgMember[]>(
+      `/orgs/${encodeURIComponent(org)}/members?${params}`,
+      { signal: options.signal },
+    )
+    return data.map(item => ({
+      login: item.login,
+      id: item.id,
+      avatarUrl: item.avatar_url,
+      url: item.html_url,
+    }))
+  }
+
+  async listOrgTeams(org: string, options: { perPage?: number; signal?: AbortSignal } = {}): Promise<TeamItem[]> {
+    const params = new URLSearchParams({
+      per_page: String(Math.max(1, Math.min(options.perPage ?? 30, 100))),
+    })
+    const data = await this.request<RawTeam[]>(
+      `/orgs/${encodeURIComponent(org)}/teams?${params}`,
+      { signal: options.signal },
+    )
+    return data.map(mapTeam)
+  }
+
+  async getTeam(org: string, teamSlug: string, signal?: AbortSignal): Promise<TeamItem> {
+    const data = await this.request<RawTeam>(
+      `/orgs/${encodeURIComponent(org)}/teams/${encodeURIComponent(teamSlug)}`,
+      { signal },
+    )
+    return mapTeam(data)
+  }
+
+  async listTeamMembers(org: string, teamSlug: string, options: { role?: 'all' | 'member' | 'maintainer'; perPage?: number; signal?: AbortSignal } = {}): Promise<OrgMemberItem[]> {
+    const params = new URLSearchParams({
+      role: options.role ?? 'all',
+      per_page: String(Math.max(1, Math.min(options.perPage ?? 30, 100))),
+    })
+    const data = await this.request<RawOrgMember[]>(
+      `/orgs/${encodeURIComponent(org)}/teams/${encodeURIComponent(teamSlug)}/members?${params}`,
+      { signal: options.signal },
+    )
+    return data.map(item => ({
+      login: item.login,
+      id: item.id,
+      avatarUrl: item.avatar_url,
+      url: item.html_url,
+    }))
+  }
+
+  async listTeamRepos(org: string, teamSlug: string, options: { perPage?: number; signal?: AbortSignal } = {}): Promise<OrgRepoItem[]> {
+    const params = new URLSearchParams({
+      per_page: String(Math.max(1, Math.min(options.perPage ?? 30, 100))),
+    })
+    const data = await this.request<RawOrgRepo[]>(
+      `/orgs/${encodeURIComponent(org)}/teams/${encodeURIComponent(teamSlug)}/repos?${params}`,
+      { signal: options.signal },
+    )
+    return data.map(mapOrgRepo)
+  }
+
+  async setTeamMembership(org: string, teamSlug: string, username: string, input: { role?: 'member' | 'maintainer' } = {}, signal?: AbortSignal): Promise<TeamMembershipResult> {
+    try {
+      const data = await this.request<{ role: string; state: string }>(
+        `/orgs/${encodeURIComponent(org)}/teams/${encodeURIComponent(teamSlug)}/memberships/${encodeURIComponent(username)}`,
+        { method: 'PUT', body: { role: input.role ?? 'member' }, signal },
+      )
+      return { ok: true, username, role: data.role, state: data.state }
+    } catch (error) {
+      if (error instanceof GithubError && (error.status === 404 || error.status === 422)) {
+        return { ok: false, username, reason: 'Could not update team membership (team or user not found, or invalid role).' }
+      }
+      throw error
+    }
+  }
+
+  async removeTeamMembership(org: string, teamSlug: string, username: string, signal?: AbortSignal): Promise<TeamMembershipResult> {
+    try {
+      await this.request<unknown>(
+        `/orgs/${encodeURIComponent(org)}/teams/${encodeURIComponent(teamSlug)}/memberships/${encodeURIComponent(username)}`,
+        { method: 'DELETE', signal },
+      )
+      return { ok: true, username }
+    } catch (error) {
+      if (error instanceof GithubError && (error.status === 404 || error.status === 422)) {
+        return { ok: false, username, reason: 'Could not remove team membership (team or user not found).' }
+      }
+      throw error
     }
   }
 

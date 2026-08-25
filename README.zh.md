@@ -77,6 +77,15 @@ npm install /path/to/dsh-tool-github
 | `github_request_pr_reviewers` | 邀请用户或团队评审 PR | 是 |
 | `github_submit_pr_review` | 批准、请求修改或评论 PR | 是 |
 | `github_get_user` | 查询用户/组织信息（名称、bio、粉丝、仓库数） | 否 |
+| `github_get_org` | 查询组织资料与仓库数量 | 否 |
+| `github_list_org_repos` | 列出组织仓库（含可见性信息） | 否 |
+| `github_list_org_members` | 列出组织成员 | 是 |
+| `github_list_org_teams` | 列出组织团队 | 是 |
+| `github_get_team` | 按 slug 查询组织团队 | 是 |
+| `github_list_team_members` | 列出团队内成员 | 是 |
+| `github_list_team_repos` | 列出团队可访问仓库 | 是 |
+| `github_update_team_membership` | 添加团队成员或修改角色 | 是 |
+| `github_remove_team_membership` | 从组织团队移除用户 | 是 |
 | `github_list_workflow_runs` | 查看 Actions 运行（workflow、分支、状态） | 否* |
 | `github_list_workflows` | 查看仓库 Actions workflows（名称、路径、状态） | 否* |
 | `github_get_workflow` | 查看单个 workflow 详情 | 否* |

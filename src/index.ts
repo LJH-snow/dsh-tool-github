@@ -3443,5 +3443,551 @@ export function createTools(client: GithubClient) {
         return client.deleteEnvironment(args.owner as string, args.repo as string, args.name as string, exec.signal)
       },
     }),
+
+    defineTool({
+      name: 'github_get_org',
+      description: 'Get GitHub organization profile data: name, description, repo counts, location, blog, and URL.',
+      parameters: {
+        org: { type: 'string', required: true, description: 'Organization login' },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            found: { type: 'boolean', description: 'Whether the organization exists' },
+            login: { type: 'string', description: 'Organization login' },
+            name: { oneOf: [{ type: 'string' }, { type: 'null' }], description: 'Display name' },
+            description: { oneOf: [{ type: 'string' }, { type: 'null' }], description: 'Organization description' },
+            publicRepos: { type: 'integer', description: 'Public repository count' },
+            totalPrivateRepos: { oneOf: [{ type: 'integer' }, { type: 'null' }], description: 'Private repository count' },
+            location: { oneOf: [{ type: 'string' }, { type: 'null' }], description: 'Location' },
+            blog: { oneOf: [{ type: 'string' }, { type: 'null' }], description: 'Website URL' },
+            createdAt: { oneOf: [{ type: 'string' }, { type: 'null' }], description: 'ISO creation timestamp' },
+            url: { type: 'string', description: 'Organization URL' },
+            reason: { type: 'string', description: 'Explanation when not found' },
+          },
+        },
+        render: (_args, value) => {
+          if (!value.found) return [{ type: 'text', text: 'Organization not found.' }]
+          return [{
+            type: 'text',
+            text: [
+              `${value.name ?? value.login} (@${value.login})`,
+              `description: ${value.description ?? 'n/a'}`,
+              `public repos: ${value.publicRepos}`,
+              `private repos: ${value.totalPrivateRepos ?? 'n/a'}`,
+              `location: ${value.location ?? 'n/a'}`,
+              `blog: ${value.blog ?? 'n/a'}`,
+              `created: ${value.createdAt ?? 'n/a'}`,
+              value.url ?? '',
+            ].filter(Boolean).join('\n'),
+          }]
+        },
+      },
+      presentCall(args): ToolCallView {
+        return { card: 'generic', title: `Org ${args.org}`, kind: 'read' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { found?: boolean; login?: string; name?: string | null }
+        if (!v.found) return { card: 'generic', title: 'Organization not found' }
+        return { card: 'generic', title: `Org ${v.name ?? v.login}` }
+      },
+      async execute(args, exec) {
+        try {
+          const org = await client.getOrg(args.org as string, exec.signal)
+          return { found: true, ...org }
+        } catch (error) {
+          if (error instanceof GithubError && error.status === 404) {
+            return { found: false }
+          }
+          throw error
+        }
+      },
+    }),
+
+    defineTool({
+      name: 'github_list_org_repos',
+      description: 'List repositories in a GitHub organization, with optional type filtering and visibility metadata.',
+      parameters: {
+        org: { type: 'string', required: true, description: 'Organization login' },
+        type: { type: 'string', enum: ['all', 'public', 'private', 'forks', 'sources', 'member'], description: 'Repository type filter (default all)' },
+        limit: { type: 'integer', description: 'Maximum results, 1-100 (default 30)' },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            found: { type: 'boolean', description: 'Whether the organization can be queried' },
+            reason: { type: 'string', description: 'Explanation when not found' },
+            items: {
+              type: 'array',
+              items: {
+                type: 'object',
+                additionalProperties: false,
+                properties: {
+                  fullName: { type: 'string', description: 'Full repository name' },
+                  owner: { type: 'string', description: 'Repository owner login' },
+                  name: { type: 'string', description: 'Repository name' },
+                  description: { oneOf: [{ type: 'string' }, { type: 'null' }], description: 'Repository description' },
+                  stars: { type: 'integer', description: 'Star count' },
+                  language: { oneOf: [{ type: 'string' }, { type: 'null' }], description: 'Primary language' },
+                  visibility: { oneOf: [{ type: 'string' }, { type: 'null' }], description: 'Repository visibility' },
+                  fork: { type: 'boolean', description: 'Whether the repository is a fork' },
+                  privateRepo: { type: 'boolean', description: 'Whether the repository is private' },
+                  updatedAt: { type: 'string', description: 'ISO update timestamp' },
+                  url: { type: 'string', description: 'Repository URL' },
+                },
+              },
+            },
+          },
+        },
+        render: (_args, value) => {
+          if (!value.found) return [{ type: 'text', text: 'Organization not found.' }]
+          const items = value.items ?? []
+          if (items.length === 0) return [{ type: 'text', text: 'No repositories found.' }]
+          return [{ type: 'text', text: items.map(item => `${item.fullName} (${item.stars} stars, ${item.language ?? 'n/a'}, updated ${item.updatedAt})`).join('\n') }]
+        },
+      },
+      presentCall(args): ToolCallView {
+        return { card: 'generic', title: `Org repos: ${args.org}`, kind: 'search' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { found?: boolean; items?: Array<{ fullName: string; stars: number }> }
+        if (!v.found) return { card: 'generic', title: 'Organization not found' }
+        const items = v.items ?? []
+        if (items.length === 0) return { card: 'generic', title: 'No repos' }
+        return { card: 'generic', title: `${items.length} repo(s)`, content: [{ type: 'text', text: items.map(i => `${i.fullName} (${i.stars})`).join('\n') }] }
+      },
+      async execute(args, exec) {
+        const limit = args.limit === undefined ? 30 : Math.max(1, Math.min(args.limit as number, 100))
+        try {
+          const items = await client.listOrgRepos(args.org as string, { type: args.type as 'all' | 'public' | 'private' | 'forks' | 'sources' | 'member' | undefined, perPage: limit, signal: exec.signal })
+          return { found: true, items }
+        } catch (error) {
+          if (error instanceof GithubError && error.status === 404) {
+            return { found: false, items: [] }
+          }
+          throw error
+        }
+      },
+    }),
+
+    defineTool({
+      name: 'github_list_org_members',
+      description: 'List members of a GitHub organization. Requires a token with organization member read access.',
+      parameters: {
+        org: { type: 'string', required: true, description: 'Organization login' },
+        role: { type: 'string', enum: ['all', 'admin', 'member'], description: 'Filter by organization role (default all)' },
+        limit: { type: 'integer', description: 'Maximum results, 1-100 (default 30)' },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            found: { type: 'boolean', description: 'Whether members can be listed' },
+            reason: { type: 'string', description: 'Explanation when members are not accessible' },
+            items: {
+              type: 'array',
+              items: {
+                type: 'object',
+                additionalProperties: false,
+                properties: {
+                  login: { type: 'string', description: 'Member login' },
+                  id: { type: 'integer', description: 'Member user id' },
+                  avatarUrl: { type: 'string', description: 'Avatar URL' },
+                  url: { type: 'string', description: 'Profile URL' },
+                },
+              },
+            },
+          },
+        },
+        render: (_args, value) => {
+          if (!value.found) return [{ type: 'text', text: 'Organization members are not accessible.' }]
+          const items = value.items ?? []
+          if (items.length === 0) return [{ type: 'text', text: 'No members found.' }]
+          return [{ type: 'text', text: items.map(item => `${item.login} (${item.url})`).join('\n') }]
+        },
+      },
+      presentCall(args): ToolCallView {
+        return { card: 'generic', title: `Org members: ${args.org}`, kind: 'search' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { found?: boolean; items?: Array<{ login: string }> }
+        if (!v.found) return { card: 'generic', title: 'Members not accessible' }
+        const items = v.items ?? []
+        if (items.length === 0) return { card: 'generic', title: 'No members' }
+        return { card: 'generic', title: `${items.length} member(s)`, content: [{ type: 'text', text: items.map(i => i.login).join('\n') }] }
+      },
+      async execute(args, exec) {
+        if (!client.hasToken()) {
+          return { found: false, items: [], reason: 'Listing organization members requires a GitHub token with organization member access.' }
+        }
+        const limit = args.limit === undefined ? 30 : Math.max(1, Math.min(args.limit as number, 100))
+        try {
+          const items = await client.listOrgMembers(args.org as string, { role: args.role as 'all' | 'admin' | 'member' | undefined, perPage: limit, signal: exec.signal })
+          return { found: true, items }
+        } catch (error) {
+          if (error instanceof GithubError && error.status === 404) {
+            return { found: false, items: [] }
+          }
+          throw error
+        }
+      },
+    }),
+
+    defineTool({
+      name: 'github_list_org_teams',
+      description: 'List teams in a GitHub organization. Requires a token with organization admin or member read access.',
+      parameters: {
+        org: { type: 'string', required: true, description: 'Organization login' },
+        limit: { type: 'integer', description: 'Maximum results, 1-100 (default 30)' },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            found: { type: 'boolean', description: 'Whether teams can be listed' },
+            reason: { type: 'string', description: 'Explanation when teams are not accessible' },
+            items: {
+              type: 'array',
+              items: {
+                type: 'object',
+                additionalProperties: false,
+                properties: {
+                  id: { type: 'integer', description: 'Team id' },
+                  name: { type: 'string', description: 'Team name' },
+                  slug: { type: 'string', description: 'Team slug' },
+                  description: { oneOf: [{ type: 'string' }, { type: 'null' }], description: 'Team description' },
+                  privacy: { type: 'string', description: 'Team privacy' },
+                  permission: { type: 'string', description: 'Team permission' },
+                  url: { type: 'string', description: 'Team API URL' },
+                  htmlUrl: { type: 'string', description: 'Team page URL' },
+                  membersCount: { oneOf: [{ type: 'integer' }, { type: 'null' }], description: 'Member count' },
+                  reposCount: { oneOf: [{ type: 'integer' }, { type: 'null' }], description: 'Repository count' },
+                },
+              },
+            },
+          },
+        },
+        render: (_args, value) => {
+          if (!value.found) return [{ type: 'text', text: 'Organization teams are not accessible.' }]
+          const items = value.items ?? []
+          if (items.length === 0) return [{ type: 'text', text: 'No teams found.' }]
+          return [{ type: 'text', text: items.map(item => `${item.name} (${item.slug}, ${item.permission}, ${item.privacy}, ${item.membersCount ?? '?'} members)`).join('\n') }]
+        },
+      },
+      presentCall(args): ToolCallView {
+        return { card: 'generic', title: `Org teams: ${args.org}`, kind: 'search' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { found?: boolean; items?: Array<{ name: string; slug: string }> }
+        if (!v.found) return { card: 'generic', title: 'Teams not accessible' }
+        const items = v.items ?? []
+        if (items.length === 0) return { card: 'generic', title: 'No teams' }
+        return { card: 'generic', title: `${items.length} team(s)`, content: [{ type: 'text', text: items.map(i => `${i.name} (${i.slug})`).join('\n') }] }
+      },
+      async execute(args, exec) {
+        if (!client.hasToken()) {
+          return { found: false, items: [], reason: 'Listing organization teams requires a GitHub token with organization access.' }
+        }
+        const limit = args.limit === undefined ? 30 : Math.max(1, Math.min(args.limit as number, 100))
+        try {
+          const items = await client.listOrgTeams(args.org as string, { perPage: limit, signal: exec.signal })
+          return { found: true, items }
+        } catch (error) {
+          if (error instanceof GithubError && error.status === 404) {
+            return { found: false, items: [] }
+          }
+          throw error
+        }
+      },
+    }),
+
+    defineTool({
+      name: 'github_get_team',
+      description: 'Get one GitHub organization team by slug, including permission, privacy, and member/repo counts. Requires a token with organization access.',
+      parameters: {
+        org: { type: 'string', required: true, description: 'Organization login' },
+        teamSlug: { type: 'string', required: true, description: 'Team slug, e.g. core-maintainers' },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            found: { type: 'boolean', description: 'Whether the team exists and is accessible' },
+            id: { type: 'integer', description: 'Team id' },
+            name: { type: 'string', description: 'Team name' },
+            slug: { type: 'string', description: 'Team slug' },
+            description: { oneOf: [{ type: 'string' }, { type: 'null' }], description: 'Team description' },
+            privacy: { type: 'string', description: 'Team privacy' },
+            permission: { type: 'string', description: 'Team permission' },
+            url: { type: 'string', description: 'Team API URL' },
+            htmlUrl: { type: 'string', description: 'Team page URL' },
+            membersCount: { oneOf: [{ type: 'integer' }, { type: 'null' }], description: 'Member count' },
+            reposCount: { oneOf: [{ type: 'integer' }, { type: 'null' }], description: 'Repository count' },
+            reason: { type: 'string', description: 'Explanation when not found' },
+          },
+        },
+        render: (_args, value) => {
+          if (!value.found) return [{ type: 'text', text: 'Team not found or not accessible.' }]
+          return [{
+            type: 'text',
+            text: [
+              `${value.name} (${value.slug})`,
+              `permission: ${value.permission}`,
+              `privacy: ${value.privacy}`,
+              `members: ${value.membersCount ?? 'n/a'}`,
+              `repos: ${value.reposCount ?? 'n/a'}`,
+              `description: ${value.description ?? 'n/a'}`,
+              value.htmlUrl ?? '',
+            ].filter(Boolean).join('\n'),
+          }]
+        },
+      },
+      presentCall(args): ToolCallView {
+        return { card: 'generic', title: `Team ${args.teamSlug}`, kind: 'read' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { found?: boolean; name?: string; htmlUrl?: string }
+        if (!v.found) return { card: 'generic', title: 'Team not found' }
+        return { card: 'generic', title: `Team ${v.name}`, content: [{ type: 'text', text: v.htmlUrl ?? '' }] }
+      },
+      async execute(args, exec) {
+        if (!client.hasToken()) {
+          return { found: false, reason: 'Getting a team requires a GitHub token with organization access.' }
+        }
+        try {
+          const team = await client.getTeam(args.org as string, args.teamSlug as string, exec.signal)
+          return { found: true, ...team }
+        } catch (error) {
+          if (error instanceof GithubError && error.status === 404) {
+            return { found: false }
+          }
+          throw error
+        }
+      },
+    }),
+
+    defineTool({
+      name: 'github_list_team_members',
+      description: 'List members of a GitHub organization team. Requires a token with organization access.',
+      parameters: {
+        org: { type: 'string', required: true, description: 'Organization login' },
+        teamSlug: { type: 'string', required: true, description: 'Team slug' },
+        role: { type: 'string', enum: ['all', 'member', 'maintainer'], description: 'Filter by team role (default all)' },
+        limit: { type: 'integer', description: 'Maximum results, 1-100 (default 30)' },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            found: { type: 'boolean', description: 'Whether team members can be listed' },
+            reason: { type: 'string', description: 'Explanation when members are not accessible' },
+            items: {
+              type: 'array',
+              items: {
+                type: 'object',
+                additionalProperties: false,
+                properties: {
+                  login: { type: 'string', description: 'Member login' },
+                  id: { type: 'integer', description: 'Member user id' },
+                  avatarUrl: { type: 'string', description: 'Avatar URL' },
+                  url: { type: 'string', description: 'Profile URL' },
+                },
+              },
+            },
+          },
+        },
+        render: (_args, value) => {
+          if (!value.found) return [{ type: 'text', text: 'Team members are not accessible.' }]
+          const items = value.items ?? []
+          if (items.length === 0) return [{ type: 'text', text: 'No team members found.' }]
+          return [{ type: 'text', text: items.map(item => `${item.login} (${item.url})`).join('\n') }]
+        },
+      },
+      presentCall(args): ToolCallView {
+        return { card: 'generic', title: `Team members: ${args.org}/${args.teamSlug}`, kind: 'search' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { found?: boolean; items?: Array<{ login: string }> }
+        if (!v.found) return { card: 'generic', title: 'Team members not accessible' }
+        const items = v.items ?? []
+        if (items.length === 0) return { card: 'generic', title: 'No team members' }
+        return { card: 'generic', title: `${items.length} member(s)`, content: [{ type: 'text', text: items.map(i => i.login).join('\n') }] }
+      },
+      async execute(args, exec) {
+        if (!client.hasToken()) {
+          return { found: false, items: [], reason: 'Listing team members requires a GitHub token with organization access.' }
+        }
+        const limit = args.limit === undefined ? 30 : Math.max(1, Math.min(args.limit as number, 100))
+        try {
+          const items = await client.listTeamMembers(args.org as string, args.teamSlug as string, { role: args.role as 'all' | 'member' | 'maintainer' | undefined, perPage: limit, signal: exec.signal })
+          return { found: true, items }
+        } catch (error) {
+          if (error instanceof GithubError && error.status === 404) {
+            return { found: false, items: [] }
+          }
+          throw error
+        }
+      },
+    }),
+
+    defineTool({
+      name: 'github_list_team_repos',
+      description: 'List repositories accessible to a GitHub organization team. Requires a token with organization access.',
+      parameters: {
+        org: { type: 'string', required: true, description: 'Organization login' },
+        teamSlug: { type: 'string', required: true, description: 'Team slug' },
+        limit: { type: 'integer', description: 'Maximum results, 1-100 (default 30)' },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            found: { type: 'boolean', description: 'Whether team repositories can be listed' },
+            reason: { type: 'string', description: 'Explanation when repositories are not accessible' },
+            items: {
+              type: 'array',
+              items: {
+                type: 'object',
+                additionalProperties: false,
+                properties: {
+                  fullName: { type: 'string', description: 'Full repository name' },
+                  owner: { type: 'string', description: 'Repository owner login' },
+                  name: { type: 'string', description: 'Repository name' },
+                  description: { oneOf: [{ type: 'string' }, { type: 'null' }], description: 'Repository description' },
+                  stars: { type: 'integer', description: 'Star count' },
+                  language: { oneOf: [{ type: 'string' }, { type: 'null' }], description: 'Primary language' },
+                  visibility: { oneOf: [{ type: 'string' }, { type: 'null' }], description: 'Repository visibility' },
+                  fork: { type: 'boolean', description: 'Whether the repository is a fork' },
+                  privateRepo: { type: 'boolean', description: 'Whether the repository is private' },
+                  updatedAt: { type: 'string', description: 'ISO update timestamp' },
+                  url: { type: 'string', description: 'Repository URL' },
+                },
+              },
+            },
+          },
+        },
+        render: (_args, value) => {
+          if (!value.found) return [{ type: 'text', text: 'Team repositories are not accessible.' }]
+          const items = value.items ?? []
+          if (items.length === 0) return [{ type: 'text', text: 'No team repositories found.' }]
+          return [{ type: 'text', text: items.map(item => `${item.fullName} (${item.visibility ?? 'n/a'}, ${item.stars} stars)`).join('\n') }]
+        },
+      },
+      presentCall(args): ToolCallView {
+        return { card: 'generic', title: `Team repos: ${args.org}/${args.teamSlug}`, kind: 'search' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { found?: boolean; items?: Array<{ fullName: string }> }
+        if (!v.found) return { card: 'generic', title: 'Team repos not accessible' }
+        const items = v.items ?? []
+        if (items.length === 0) return { card: 'generic', title: 'No team repos' }
+        return { card: 'generic', title: `${items.length} repo(s)`, content: [{ type: 'text', text: items.map(i => i.fullName).join('\n') }] }
+      },
+      async execute(args, exec) {
+        if (!client.hasToken()) {
+          return { found: false, items: [], reason: 'Listing team repositories requires a GitHub token with organization access.' }
+        }
+        const limit = args.limit === undefined ? 30 : Math.max(1, Math.min(args.limit as number, 100))
+        try {
+          const items = await client.listTeamRepos(args.org as string, args.teamSlug as string, { perPage: limit, signal: exec.signal })
+          return { found: true, items }
+        } catch (error) {
+          if (error instanceof GithubError && error.status === 404) {
+            return { found: false, items: [] }
+          }
+          throw error
+        }
+      },
+    }),
+
+    defineTool({
+      name: 'github_update_team_membership',
+      description: 'Add a user to a GitHub organization team or change their role to member/maintainer. WRITE operation: requires a token.',
+      parameters: {
+        org: { type: 'string', required: true, description: 'Organization login' },
+        teamSlug: { type: 'string', required: true, description: 'Team slug' },
+        username: { type: 'string', required: true, description: 'GitHub username' },
+        role: { type: 'string', enum: ['member', 'maintainer'], description: 'Team role (default member)' },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            ok: { type: 'boolean', description: 'Whether membership was updated' },
+            username: { type: 'string', description: 'GitHub username' },
+            role: { type: 'string', description: 'Current team role' },
+            state: { type: 'string', description: 'Membership state' },
+            reason: { type: 'string', description: 'Explanation when not updated' },
+          },
+        },
+        render: (_args, value) => {
+          if (value.ok) return [{ type: 'text', text: `Updated ${value.username} as ${value.role} on team ${_args.teamSlug} (${value.state})` }]
+          return [{ type: 'text', text: `Could not update ${value.username} on team ${_args.teamSlug}: ${value.reason}` }]
+        },
+      },
+      presentCall(args): ToolCallView {
+        return { card: 'generic', title: `Update team member ${args.username}`, kind: 'edit' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { ok?: boolean; username?: string; role?: string; state?: string; reason?: string }
+        if (v.ok) return { card: 'generic', title: `Team membership ${v.username} updated`, content: [{ type: 'text', text: `${v.role} (${v.state})` }] }
+        return { card: 'generic', title: 'Team membership update failed', content: [{ type: 'text', text: v.reason ?? 'Unknown' }] }
+      },
+      async execute(args, exec) {
+        if (!client.hasToken()) {
+          return { ok: false, username: args.username as string, reason: 'Updating team membership requires a GitHub token with organization access.' }
+        }
+        return client.setTeamMembership(args.org as string, args.teamSlug as string, args.username as string, { role: args.role as 'member' | 'maintainer' | undefined }, exec.signal)
+      },
+    }),
+
+    defineTool({
+      name: 'github_remove_team_membership',
+      description: 'Remove a user from a GitHub organization team. WRITE operation: requires a token.',
+      parameters: {
+        org: { type: 'string', required: true, description: 'Organization login' },
+        teamSlug: { type: 'string', required: true, description: 'Team slug' },
+        username: { type: 'string', required: true, description: 'GitHub username' },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            ok: { type: 'boolean', description: 'Whether membership was removed' },
+            username: { type: 'string', description: 'GitHub username' },
+            reason: { type: 'string', description: 'Explanation when not removed' },
+          },
+        },
+        render: (_args, value) => {
+          if (value.ok) return [{ type: 'text', text: `Removed ${value.username} from team ${_args.teamSlug}` }]
+          return [{ type: 'text', text: `Could not remove ${value.username} from team ${_args.teamSlug}: ${value.reason}` }]
+        },
+      },
+      presentCall(args): ToolCallView {
+        return { card: 'generic', title: `Remove team member ${args.username}`, kind: 'edit' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { ok?: boolean; username?: string; reason?: string }
+        if (v.ok) return { card: 'generic', title: `Removed ${v.username}` }
+        return { card: 'generic', title: 'Remove team member failed', content: [{ type: 'text', text: v.reason ?? 'Unknown' }] }
+      },
+      async execute(args, exec) {
+        if (!client.hasToken()) {
+          return { ok: false, username: args.username as string, reason: 'Removing team membership requires a GitHub token with organization access.' }
+        }
+        return client.removeTeamMembership(args.org as string, args.teamSlug as string, args.username as string, exec.signal)
+      },
+    }),
   ]
 }

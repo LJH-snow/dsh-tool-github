@@ -75,6 +75,15 @@ Full example: [examples/cordis.yml](examples/cordis.yml).
 | `github_request_pr_reviewers` | Request user or team reviewers on a PR | yes |
 | `github_submit_pr_review` | Approve, request changes, or comment on a PR | yes |
 | `github_get_user` | Get user/org info (name, bio, followers, repos) | no |
+| `github_get_org` | Get organization profile and repo counts | no |
+| `github_list_org_repos` | List organization repositories with visibility metadata | no |
+| `github_list_org_members` | List organization members | yes |
+| `github_list_org_teams` | List organization teams | yes |
+| `github_get_team` | Get one organization team by slug | yes |
+| `github_list_team_members` | List members of an organization team | yes |
+| `github_list_team_repos` | List repositories accessible to an organization team | yes |
+| `github_update_team_membership` | Add a team member or change their role | yes |
+| `github_remove_team_membership` | Remove a user from an organization team | yes |
 | `github_list_workflow_runs` | List Actions runs (workflow, branch, status) | no* |
 | `github_list_workflows` | List Actions workflows (name, path, state) | no* |
 | `github_get_workflow` | Get a workflow detail | no* |

@@ -36,9 +36,11 @@ describe('tool definitions', () => {
       'github_get_environment',
       'github_get_file',
       'github_get_issue',
+      'github_get_org',
       'github_get_pull_request',
       'github_get_readme',
       'github_get_repo',
+      'github_get_team',
       'github_get_user',
       'github_get_workflow',
       'github_get_workflow_run',
@@ -50,6 +52,9 @@ describe('tool definitions', () => {
       'github_list_issue_comments',
       'github_list_issues',
       'github_list_milestones',
+      'github_list_org_members',
+      'github_list_org_repos',
+      'github_list_org_teams',
       'github_list_pr_comments',
       'github_list_prs',
       'github_list_pull_request_reviews',
@@ -59,10 +64,13 @@ describe('tool definitions', () => {
       'github_list_repo_variables',
       'github_list_run_artifacts',
       'github_list_tags',
+      'github_list_team_members',
+      'github_list_team_repos',
       'github_list_workflow_jobs',
       'github_list_workflow_runs',
       'github_list_workflows',
       'github_merge_pr',
+      'github_remove_team_membership',
       'github_reply_pr_comment',
       'github_request_pr_reviewers',
       'github_rerun_workflow_run',
@@ -79,6 +87,7 @@ describe('tool definitions', () => {
       'github_unstar_repo',
       'github_update_environment',
       'github_update_issue',
+      'github_update_team_membership',
       'github_write_file',
     ])
   })
@@ -195,9 +204,11 @@ describe('extended tools (stage 5)', () => {
       'github_get_environment',
       'github_get_file',
       'github_get_issue',
+      'github_get_org',
       'github_get_pull_request',
       'github_get_readme',
       'github_get_repo',
+      'github_get_team',
       'github_get_user',
       'github_get_workflow',
       'github_get_workflow_run',
@@ -209,6 +220,9 @@ describe('extended tools (stage 5)', () => {
       'github_list_issue_comments',
       'github_list_issues',
       'github_list_milestones',
+      'github_list_org_members',
+      'github_list_org_repos',
+      'github_list_org_teams',
       'github_list_pr_comments',
       'github_list_prs',
       'github_list_pull_request_reviews',
@@ -218,10 +232,13 @@ describe('extended tools (stage 5)', () => {
       'github_list_repo_variables',
       'github_list_run_artifacts',
       'github_list_tags',
+      'github_list_team_members',
+      'github_list_team_repos',
       'github_list_workflow_jobs',
       'github_list_workflow_runs',
       'github_list_workflows',
       'github_merge_pr',
+      'github_remove_team_membership',
       'github_reply_pr_comment',
       'github_request_pr_reviewers',
       'github_rerun_workflow_run',
@@ -238,6 +255,7 @@ describe('extended tools (stage 5)', () => {
       'github_unstar_repo',
       'github_update_environment',
       'github_update_issue',
+      'github_update_team_membership',
       'github_write_file',
     ])
   })
@@ -813,5 +831,86 @@ describe('stage 16 tools', () => {
     expect(defs['github_get_environment'].presentCall({ owner: 'a', repo: 'b', environmentName: 'prod' })).toMatchObject({ kind: 'read' })
     expect(defs['github_update_environment'].presentCall({ owner: 'a', repo: 'b', name: 'prod' })).toMatchObject({ kind: 'edit' })
     expect(defs['github_delete_environment'].presentCall({ owner: 'a', repo: 'b', name: 'prod' })).toMatchObject({ kind: 'edit' })
+  })
+})
+
+describe('stage 17 tools', () => {
+  it('organization and team management tools require a token', async () => {
+    const noToken = Object.fromEntries(createTools(new GithubClient({ fetchImpl: vi.fn() })).map(t => [t.name, t]))
+    const cases: Array<{ name: string; args: Record<string, unknown> }> = [
+      { name: 'github_list_org_members', args: { org: 'acme' } },
+      { name: 'github_list_org_teams', args: { org: 'acme' } },
+      { name: 'github_get_team', args: { org: 'acme', teamSlug: 'core' } },
+      { name: 'github_list_team_members', args: { org: 'acme', teamSlug: 'core' } },
+      { name: 'github_list_team_repos', args: { org: 'acme', teamSlug: 'core' } },
+      { name: 'github_update_team_membership', args: { org: 'acme', teamSlug: 'core', username: 'alice' } },
+      { name: 'github_remove_team_membership', args: { org: 'acme', teamSlug: 'core', username: 'alice' } },
+    ]
+    for (const { name, args } of cases) {
+      const result = await noToken[name].execute(args, exec()) as Record<string, unknown>
+      expect(result.reason).toContain('token')
+      expect(name.startsWith('github_get') || name.startsWith('github_list') ? result.found : result.ok).toBe(false)
+    }
+  })
+
+  it('github_get_org and github_list_org_repos work without a token', async () => {
+    const orgFetch = vi.fn(async () => jsonResponse(200, {
+      login: 'acme', name: 'Acme', description: 'dev tools', public_repos: 12, total_private_repos: null,
+      location: 'Shanghai', blog: 'https://acme.dev', created_at: '2020-01-01T00:00:00Z', html_url: 'https://github.com/acme',
+    }))
+    const orgTool = createTools(new GithubClient({ fetchImpl: orgFetch })).find(t => t.name === 'github_get_org')!
+    expect(await orgTool.execute({ org: 'acme' }, exec())).toMatchObject({ found: true, login: 'acme', publicRepos: 12 })
+
+    const repoFetch = vi.fn(async () => jsonResponse(200, [{ full_name: 'acme/tools', name: 'tools', description: null, stargazers_count: 0, language: null, visibility: 'public', fork: false, private: false, updated_at: '2026-08-25T00:00:00Z', html_url: 'https://github.com/acme/tools' }]))
+    const repoTool = createTools(new GithubClient({ fetchImpl: repoFetch })).find(t => t.name === 'github_list_org_repos')!
+    expect(await repoTool.execute({ org: 'acme', limit: 50 }, exec())).toMatchObject({ found: true, items: [{ fullName: 'acme/tools' }] })
+    expect(String(repoFetch.mock.calls[0][0])).toContain('per_page=50')
+
+    const missing = createTools(new GithubClient({ fetchImpl: vi.fn(async () => jsonResponse(404, {})) })).find(t => t.name === 'github_get_org')!
+    expect(await missing.execute({ org: 'nope' }, exec())).toEqual({ found: false })
+  })
+
+  it('org and team reads pass through with a token', async () => {
+    const memberFetch = vi.fn(async () => jsonResponse(200, [{ login: 'alice', id: 1, avatar_url: 'https://avatar', html_url: 'https://github.com/alice' }]))
+    const memberTool = createTools(new GithubClient({ token: 'ghp_test', fetchImpl: memberFetch })).find(t => t.name === 'github_list_org_members')!
+    expect(await memberTool.execute({ org: 'acme', role: 'admin' }, exec())).toMatchObject({ found: true, items: [{ login: 'alice' }] })
+    expect(String(memberFetch.mock.calls[0][0])).toContain('role=admin')
+
+    const teamListFetch = vi.fn(async () => jsonResponse(200, [{ id: 7, name: 'Core', slug: 'core', description: null, privacy: 'closed', permission: 'admin', url: 'https://api', html_url: 'https://github.com/orgs/acme/teams/core', members_count: 3, repos_count: 5 }]))
+    const teamListTool = createTools(new GithubClient({ token: 'ghp_test', fetchImpl: teamListFetch })).find(t => t.name === 'github_list_org_teams')!
+    expect(await teamListTool.execute({ org: 'acme' }, exec())).toMatchObject({ found: true, items: [{ slug: 'core' }] })
+
+    const teamFetch = vi.fn(async () => jsonResponse(200, { id: 7, name: 'Core', slug: 'core', description: null, privacy: 'closed', permission: 'pull', url: 'https://api', html_url: 'https://github.com/orgs/acme/teams/core', members_count: null, repos_count: null }))
+    const teamTool = createTools(new GithubClient({ token: 'ghp_test', fetchImpl: teamFetch })).find(t => t.name === 'github_get_team')!
+    expect(await teamTool.execute({ org: 'acme', teamSlug: 'core' }, exec())).toMatchObject({ found: true, permission: 'pull' })
+
+    const teamRepoFetch = vi.fn(async () => jsonResponse(200, [{ full_name: 'acme/tools', name: 'tools', description: null, stargazers_count: 0, language: null, visibility: 'public', fork: false, private: false, updated_at: '2026-08-25T00:00:00Z', html_url: 'https://github.com/acme/tools' }]))
+    const teamRepoTool = createTools(new GithubClient({ token: 'ghp_test', fetchImpl: teamRepoFetch })).find(t => t.name === 'github_list_team_repos')!
+    expect(await teamRepoTool.execute({ org: 'acme', teamSlug: 'core' }, exec())).toMatchObject({ found: true, items: [{ fullName: 'acme/tools' }] })
+  })
+
+  it('team membership write tools pass through with a token', async () => {
+    const updateFetch = vi.fn(async () => jsonResponse(200, { url: 'https://api.github.com/orgs/acme/teams/core/memberships/alice', role: 'maintainer', state: 'active' }))
+    const updateTool = createTools(new GithubClient({ token: 'ghp_test', fetchImpl: updateFetch })).find(t => t.name === 'github_update_team_membership')!
+    expect(await updateTool.execute({ org: 'acme', teamSlug: 'core', username: 'alice', role: 'maintainer' }, exec())).toEqual({ ok: true, username: 'alice', role: 'maintainer', state: 'active' })
+    const [, updateInit] = updateFetch.mock.calls[0] as [string, RequestInit]
+    expect(JSON.parse(String(updateInit.body))).toEqual({ role: 'maintainer' })
+
+    const removeFetch = vi.fn(async () => new Response(null, { status: 204 }))
+    const removeTool = createTools(new GithubClient({ token: 'ghp_test', fetchImpl: removeFetch })).find(t => t.name === 'github_remove_team_membership')!
+    expect(await removeTool.execute({ org: 'acme', teamSlug: 'core', username: 'alice' }, exec())).toEqual({ ok: true, username: 'alice' })
+  })
+
+  it('presentCall for stage 17 tools', () => {
+    const defs = Object.fromEntries(createTools(new GithubClient()).map(t => [t.name, t])) as any
+    expect(defs['github_get_org'].presentCall({ org: 'acme' })).toMatchObject({ kind: 'read' })
+    expect(defs['github_list_org_repos'].presentCall({ org: 'acme' })).toMatchObject({ kind: 'search' })
+    expect(defs['github_list_org_members'].presentCall({ org: 'acme' })).toMatchObject({ kind: 'search' })
+    expect(defs['github_list_org_teams'].presentCall({ org: 'acme' })).toMatchObject({ kind: 'search' })
+    expect(defs['github_get_team'].presentCall({ org: 'acme', teamSlug: 'core' })).toMatchObject({ kind: 'read' })
+    expect(defs['github_list_team_members'].presentCall({ org: 'acme', teamSlug: 'core' })).toMatchObject({ kind: 'search' })
+    expect(defs['github_list_team_repos'].presentCall({ org: 'acme', teamSlug: 'core' })).toMatchObject({ kind: 'search' })
+    expect(defs['github_update_team_membership'].presentCall({ org: 'acme', teamSlug: 'core', username: 'alice' })).toMatchObject({ kind: 'edit' })
+    expect(defs['github_remove_team_membership'].presentCall({ org: 'acme', teamSlug: 'core', username: 'alice' })).toMatchObject({ kind: 'edit' })
   })
 })

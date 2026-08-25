@@ -290,7 +290,34 @@ v0.10 方向：补齐 Actions artifacts 生命周期管理与部署环境治理�
 - 8 个工具均需 token：只读工具无 token 返回 `{ found: false, reason: '... token ...' }`，写工具返回 `{ ok: false, reason: '... token ...' }`；404/422 尽量映射为业务失败值；401/403 仍抛基础设施错误。
 - 验收：typecheck ✅；130/130 单测（含 artifacts 查询映射、environment 保护规则映射、PUT/DELETE body 断言、404/422、无 token、presentCall）。
 
+### 阶段 15：Organization / Team 管理（2026-08-25 新增）
+
+v0.11 方向：补齐组织级治理，让 Agent 可以查看组织/团队结构，并维护团队成员。
+
+| 工具 | 功能 | 需 token | 状态 |
+|---|---|---|---|
+| `github_get_org` | 查询组织资料与仓库数量 | 否 | ✅ 已实现 |
+| `github_list_org_repos` | 列出组织仓库（类型过滤、可见性、star 数） | 否 | ✅ 已实现 |
+| `github_list_org_members` | 列出组织成员 | 是 | ✅ 已实现 |
+| `github_list_org_teams` | 列出组织团队 | 是 | ✅ 已实现 |
+| `github_get_team` | 按 slug 查询团队详情 | 是 | ✅ 已实现 |
+| `github_list_team_members` | 列出团队成员 | 是 | ✅ 已实现 |
+| `github_list_team_repos` | 列出团队可访问仓库 | 是 | ✅ 已实现 |
+| `github_update_team_membership` | 添加团队成员或修改 role（member/maintainer） | 是 | ✅ 已实现 |
+| `github_remove_team_membership` | 从团队移除用户 | 是 | ✅ 已实现 |
+
+- 组织公开信息免 token；组织/团队成员、团队与写操作需要 token，无 token 返回业务失败值；404/422 尽量映射为业务失败值。
+- 验收：typecheck ✅；140/140 单测（含 org/team 映射、PUT/DELETE body 断言、404/422、无 token、presentCall）。
+
 ## 5. 开发日志（每次推进后追加，带时间戳）
+
+### 2026-08-25（阶段 15：Organization / Team 管理完成，共 73 个工具）
+- 新增 `github_get_org` / `github_list_org_repos`：GET `/orgs/{org}` 与 `/orgs/{org}/repos`，公开数据免 token，仓库映射可见性、star、语言、更新时间。
+- 新增 `github_list_org_members` / `github_list_org_teams`：GET `/orgs/{org}/members`、`/orgs/{org}/teams`，需组织访问 token。
+- 新增 `github_get_team` / `github_list_team_members` / `github_list_team_repos`：GET team endpoints，支持 slug、成员 role 过滤与仓库列表。
+- 新增 `github_update_team_membership` / `github_remove_team_membership`：PUT/DELETE `/orgs/{org}/teams/{team_slug}/memberships/{username}`，支持 member/maintainer role。
+- 测试：client +5（org 资料、org 仓库、org 成员/团队、team 详情/成员/仓库、membership PUT/DELETE 与错误路径），tools +5（无 token、公开 org 只读成功、带 token 读取、写工具传参、presentCall）；共 140/140 通过。
+- 验证：typecheck ✅、vitest 140/140 ✅、build ✅；README 中英文工具表同步（73 工具）。
 
 ### 2026-08-25（阶段 14：Actions 产物与部署环境完成，共 64 个工具）
 - 新增 `github_list_repo_artifacts`：GET `/repos/{owner}/{repo}/actions/artifacts`，支持 name/per_page，映射大小、过期时间、archive URL 与 workflow run 元数据。

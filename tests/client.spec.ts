@@ -1085,3 +1085,159 @@ describe('GithubClient stage 16', () => {
     expect((await failed.deleteEnvironment('a', 'b', 'prod')).ok).toBe(false)
   })
 })
+
+describe('GithubClient stage 17', () => {
+  it('getOrg maps organization profile fields', async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse(200, {
+      login: 'acme',
+      name: 'Acme',
+      description: 'dev tools',
+      public_repos: 12,
+      total_private_repos: 3,
+      location: 'Shanghai',
+      blog: 'https://acme.dev',
+      created_at: '2020-01-01T00:00:00Z',
+      html_url: 'https://github.com/acme',
+    }))
+    const client = new GithubClient({ fetchImpl })
+    expect(await client.getOrg('acme')).toEqual({
+      login: 'acme',
+      name: 'Acme',
+      description: 'dev tools',
+      publicRepos: 12,
+      totalPrivateRepos: 3,
+      location: 'Shanghai',
+      blog: 'https://acme.dev',
+      createdAt: '2020-01-01T00:00:00Z',
+      url: 'https://github.com/acme',
+    })
+    expect(fetchImpl.mock.calls[0][0]).toContain('/orgs/acme')
+  })
+
+  it('listOrgRepos builds the query and maps repository metadata', async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse(200, [{
+      full_name: 'acme/tools',
+      name: 'tools',
+      description: 'agent tools',
+      stargazers_count: 10,
+      language: 'TypeScript',
+      visibility: 'public',
+      fork: false,
+      private: false,
+      updated_at: '2026-08-25T00:00:00Z',
+      html_url: 'https://github.com/acme/tools',
+    }]))
+    const client = new GithubClient({ fetchImpl })
+    expect(await client.listOrgRepos('acme', { type: 'all', perPage: 50 })).toEqual([{
+      fullName: 'acme/tools',
+      owner: 'acme',
+      name: 'tools',
+      description: 'agent tools',
+      stars: 10,
+      language: 'TypeScript',
+      visibility: 'public',
+      fork: false,
+      privateRepo: false,
+      updatedAt: '2026-08-25T00:00:00Z',
+      url: 'https://github.com/acme/tools',
+    }])
+    const [url] = fetchImpl.mock.calls[0] as [string]
+    expect(url).toContain('/orgs/acme/repos?')
+    expect(url).toContain('type=all')
+    expect(url).toContain('per_page=50')
+  })
+
+  it('listOrgMembers and listOrgTeams map member and team items', async () => {
+    const memberFetch = vi.fn(async () => jsonResponse(200, [{
+      login: 'alice',
+      id: 1,
+      avatar_url: 'https://avatar.example/alice.png',
+      html_url: 'https://github.com/alice',
+    }]))
+    const memberClient = new GithubClient({ token: 'ghp_test', fetchImpl: memberFetch })
+    expect(await memberClient.listOrgMembers('acme', { role: 'admin', perPage: 50 })).toEqual([{
+      login: 'alice',
+      id: 1,
+      avatarUrl: 'https://avatar.example/alice.png',
+      url: 'https://github.com/alice',
+    }])
+    expect(String(memberFetch.mock.calls[0][0])).toContain('role=admin')
+
+    const teamFetch = vi.fn(async () => jsonResponse(200, [{
+      id: 7,
+      name: 'Core',
+      slug: 'core',
+      description: 'core maintainers',
+      privacy: 'closed',
+      permission: 'admin',
+      url: 'https://api.github.com/orgs/acme/teams/core',
+      html_url: 'https://github.com/orgs/acme/teams/core',
+      members_count: 3,
+      repos_count: 5,
+    }]))
+    const teamClient = new GithubClient({ token: 'ghp_test', fetchImpl: teamFetch })
+    expect(await teamClient.listOrgTeams('acme', { perPage: 20 })).toEqual([{
+      id: 7,
+      name: 'Core',
+      slug: 'core',
+      description: 'core maintainers',
+      privacy: 'closed',
+      permission: 'admin',
+      url: 'https://api.github.com/orgs/acme/teams/core',
+      htmlUrl: 'https://github.com/orgs/acme/teams/core',
+      membersCount: 3,
+      reposCount: 5,
+    }])
+  })
+
+  it('getTeam, listTeamMembers, and listTeamRepos map team-scoped data', async () => {
+    const teamFetch = vi.fn(async () => jsonResponse(200, {
+      id: 7,
+      name: 'Core',
+      slug: 'core',
+      description: null,
+      privacy: 'closed',
+      permission: 'pull',
+      url: 'https://api.github.com/orgs/acme/teams/core',
+      html_url: 'https://github.com/orgs/acme/teams/core',
+      members_count: null,
+      repos_count: null,
+    }))
+    const teamClient = new GithubClient({ token: 'ghp_test', fetchImpl: teamFetch })
+    expect(await teamClient.getTeam('acme', 'core')).toMatchObject({ id: 7, slug: 'core', permission: 'pull' })
+
+    const memberFetch = vi.fn(async () => jsonResponse(200, [{ login: 'bob', id: 2, avatar_url: 'https://avatar', html_url: 'https://github.com/bob' }]))
+    const memberClient = new GithubClient({ token: 'ghp_test', fetchImpl: memberFetch })
+    expect(await memberClient.listTeamMembers('acme', 'core', { role: 'member', perPage: 10 })).toEqual([{ login: 'bob', id: 2, avatarUrl: 'https://avatar', url: 'https://github.com/bob' }])
+    expect(String(memberFetch.mock.calls[0][0])).toContain('/teams/core/members?')
+    expect(String(memberFetch.mock.calls[0][0])).toContain('role=member')
+
+    const repoFetch = vi.fn(async () => jsonResponse(200, [{
+      full_name: 'acme/tools', name: 'tools', description: null, stargazers_count: 0, language: null,
+      visibility: 'public', fork: false, private: false, updated_at: '2026-08-25T00:00:00Z', html_url: 'https://github.com/acme/tools',
+    }]))
+    const repoClient = new GithubClient({ token: 'ghp_test', fetchImpl: repoFetch })
+    expect(await repoClient.listTeamRepos('acme', 'core')).toMatchObject([{ fullName: 'acme/tools', privateRepo: false }])
+    expect(String(repoFetch.mock.calls[0][0])).toContain('/teams/core/repos?')
+  })
+
+  it('setTeamMembership PUTs the role and removeTeamMembership deletes', async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse(200, { url: 'https://api.github.com/orgs/acme/teams/core/memberships/alice', role: 'maintainer', state: 'active' }))
+    const client = new GithubClient({ token: 'ghp_test', fetchImpl })
+    const result = await client.setTeamMembership('acme', 'core', 'alice', { role: 'maintainer' })
+    const [url, init] = fetchImpl.mock.calls[0] as [string, RequestInit]
+    expect(url).toContain('/orgs/acme/teams/core/memberships/alice')
+    expect(init.method).toBe('PUT')
+    expect(JSON.parse(String(init.body))).toEqual({ role: 'maintainer' })
+    expect(result).toEqual({ ok: true, username: 'alice', role: 'maintainer', state: 'active' })
+
+    const removeFetch = vi.fn(async () => new Response(null, { status: 204 }))
+    const removeClient = new GithubClient({ token: 'ghp_test', fetchImpl: removeFetch })
+    expect(await removeClient.removeTeamMembership('acme', 'core', 'alice')).toEqual({ ok: true, username: 'alice' })
+    expect(removeFetch.mock.calls[0][1]).toMatchObject({ method: 'DELETE' })
+
+    const failed = new GithubClient({ token: 'ghp_test', fetchImpl: vi.fn(async () => jsonResponse(404, {})) })
+    expect((await failed.setTeamMembership('acme', 'core', 'alice')).ok).toBe(false)
+    expect((await failed.removeTeamMembership('acme', 'core', 'alice')).ok).toBe(false)
+  })
+})
