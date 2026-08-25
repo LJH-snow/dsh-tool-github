@@ -272,7 +272,35 @@ v0.9 方向：从「能看/能创建」推进到「能整理 issue/PR 的元数�
 - 写工具无 token 返回 `{ ok: false, reason: '... token ...' }` 业务值；404/422 尽量映射为业务失败值；401/403 仍抛基础设施错误。
 - 验收：typecheck ✅；120/120 单测（含 milestones 查询映射、PATCH/POST body 断言、404/422、无 token、空输入校验、presentCall）。
 
+### 阶段 14：Actions 产物与部署环境（2026-08-25 新增）
+
+v0.10 方向：补齐 Actions artifacts 生命周期管理与部署环境治理，让 Agent 能管理 CI 产物、环境保护规则和部署分支策略。
+
+| 工具 | 功能 | 需 token | 状态 |
+|---|---|---|---|
+| `github_list_repo_artifacts` | 列出仓库全部 Actions artifacts（可按 name 过滤） | 是 | ✅ 已实现 |
+| `github_list_run_artifacts` | 列出 workflow run 产生的 artifacts | 是 | ✅ 已实现 |
+| `github_get_artifact` | 查看单个 artifact 元数据与 archive 下载 URL | 是 | ✅ 已实现 |
+| `github_delete_artifact` | 删除单个 Actions artifact | 是 | ✅ 已实现 |
+| `github_list_environments` | 列出部署环境、保护规则与分支策略 | 是 | ✅ 已实现 |
+| `github_get_environment` | 查看单个部署环境详情 | 是 | ✅ 已实现 |
+| `github_update_environment` | 创建/更新环境（wait timer、self-review、reviewers、分支策略） | 是 | ✅ 已实现 |
+| `github_delete_environment` | 删除部署环境 | 是 | ✅ 已实现 |
+
+- 8 个工具均需 token：只读工具无 token 返回 `{ found: false, reason: '... token ...' }`，写工具返回 `{ ok: false, reason: '... token ...' }`；404/422 尽量映射为业务失败值；401/403 仍抛基础设施错误。
+- 验收：typecheck ✅；130/130 单测（含 artifacts 查询映射、environment 保护规则映射、PUT/DELETE body 断言、404/422、无 token、presentCall）。
+
 ## 5. 开发日志（每次推进后追加，带时间戳）
+
+### 2026-08-25（阶段 14：Actions 产物与部署环境完成，共 64 个工具）
+- 新增 `github_list_repo_artifacts`：GET `/repos/{owner}/{repo}/actions/artifacts`，支持 name/per_page，映射大小、过期时间、archive URL 与 workflow run 元数据。
+- 新增 `github_list_run_artifacts`：GET `/actions/runs/{run_id}/artifacts`，复用同一 artifact 映射。
+- 新增 `github_get_artifact` / `github_delete_artifact`：GET/DELETE `/actions/artifacts/{artifact_id}`，404 → 业务失败值。
+- 新增 `github_list_environments` / `github_get_environment`：GET environments 端点，映射 protection_rules（wait timer、self-review、reviewers）与 deployment_branch_policy。
+- 新增 `github_update_environment`：PUT environment 端点，支持 wait_timer、prevent_self_review、reviewers 和 deployment_branch_policy；工具层禁止同时开启两种分支策略。
+- 新增 `github_delete_environment`：DELETE environment 端点，404/422 → 业务失败值。
+- 测试：client +6（artifacts 仓库/run 查询、artifact 详情与删除、environment 列表映射/404、environment 详情与 PUT body/422、environment 删除），tools +4（8 工具无 token、artifacts 读取与 404、environment 读取/写传参与策略校验、presentCall）；共 130/130 通过。
+- 验证：typecheck ✅、vitest 130/130 ✅、build ✅；README 中英文工具表同步（64 工具）。
 
 ### 2026-08-25（阶段 13：Issue/PR 工作台完成，共 56 个工具）
 - 新增 `github_list_milestones`：GET `/repos/{owner}/{repo}/milestones`，支持 state/per_page，映射开启/关闭 issue 数、截止日期、描述与 URL。

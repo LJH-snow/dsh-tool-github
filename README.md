@@ -81,11 +81,19 @@ Full example: [examples/cordis.yml](examples/cordis.yml).
 | `github_get_workflow_run` | Get a workflow run detail | no* |
 | `github_list_workflow_jobs` | List jobs and steps for a workflow run | no* |
 | `github_get_workflow_run_logs` | Download and decode workflow run logs (200k char cap) | no* |
+| `github_list_repo_artifacts` | List all repository Actions artifacts with expiry/download metadata | yes |
+| `github_list_run_artifacts` | List Actions artifacts produced by a workflow run | yes |
+| `github_get_artifact` | Get one Actions artifact and its archive download URL | yes |
+| `github_delete_artifact` | Delete an Actions artifact | yes |
 | `github_rerun_workflow_run` | Rerun a workflow run | yes |
 | `github_cancel_workflow_run` | Cancel an in-progress workflow run | yes |
 | `github_dispatch_workflow` | Dispatch a workflow_dispatch run with a ref and string inputs | yes |
 | `github_create_branch` | Create a branch from a ref | yes |
 | `github_write_file` | Create/update a file (creates a commit) | yes |
+| `github_list_environments` | List deployment environments, protection rules, and branch policy | yes |
+| `github_get_environment` | Get one deployment environment and its policy | yes |
+| `github_update_environment` | Create/update wait timer, reviewers, and branch policy | yes |
+| `github_delete_environment` | Delete a deployment environment | yes |
 | `github_get_readme` | Read the repository README (markdown) | no |
 | `github_list_tags` | List version tags | no |
 | `github_star_repo` | Star a repository | yes |

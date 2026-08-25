@@ -2917,5 +2917,531 @@ export function createTools(client: GithubClient) {
         return client.replyPrComment(args.owner as string, args.repo as string, args.prNumber as number, { commentId: args.commentId as number, body: args.body as string }, exec.signal)
       },
     }),
+
+    defineTool({
+      name: 'github_list_repo_artifacts',
+      description: 'List GitHub Actions artifacts for the whole repository, optionally filtered by name. Requires a token with Actions read access.',
+      parameters: {
+        owner: { type: 'string', required: true, description: 'Repository owner' },
+        repo: { type: 'string', required: true, description: 'Repository name' },
+        name: { type: 'string', description: 'Filter artifacts by name' },
+        limit: { type: 'integer', description: 'Maximum results, 1-100 (default 20)' },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            found: { type: 'boolean', description: 'Whether artifacts can be listed' },
+            total: { type: 'integer', description: 'Total artifact count' },
+            reason: { type: 'string', description: 'Explanation when artifacts are not accessible' },
+            items: {
+              type: 'array',
+              items: {
+                type: 'object',
+                additionalProperties: false,
+                properties: {
+                  id: { type: 'integer', description: 'Artifact id' },
+                  name: { type: 'string', description: 'Artifact name' },
+                  sizeInBytes: { type: 'integer', description: 'Artifact size in bytes' },
+                  expired: { type: 'boolean', description: 'Whether the artifact has expired' },
+                  createdAt: { type: 'string', description: 'ISO creation timestamp' },
+                  expiresAt: { oneOf: [{ type: 'string' }, { type: 'null' }], description: 'ISO expiration timestamp' },
+                  updatedAt: { type: 'string', description: 'ISO update timestamp' },
+                  archiveUrl: { oneOf: [{ type: 'string' }, { type: 'null' }], description: 'Archive download URL' },
+                  url: { type: 'string', description: 'Artifact API URL' },
+                  workflowRunId: { oneOf: [{ type: 'integer' }, { type: 'null' }], description: 'Workflow run id' },
+                  headBranch: { oneOf: [{ type: 'string' }, { type: 'null' }], description: 'Run head branch' },
+                  headSha: { oneOf: [{ type: 'string' }, { type: 'null' }], description: 'Run head SHA' },
+                },
+              },
+            },
+          },
+        },
+        render: (_args, value) => {
+          if (!value.found) return [{ type: 'text', text: 'Repository artifacts are not accessible.' }]
+          const items = value.items ?? []
+          if (items.length === 0) return [{ type: 'text', text: 'No artifacts found.' }]
+          const lines = items.map(item => `${item.name} (#${item.id}, ${item.sizeInBytes} bytes, expires ${item.expiresAt ?? 'n/a'})`)
+          return [{ type: 'text', text: `Found ${value.total ?? items.length} artifacts:\n${lines.join('\n')}` }]
+        },
+      },
+      presentCall(args): ToolCallView {
+        return { card: 'generic', title: `Artifacts: ${args.owner}/${args.repo}`, kind: 'search' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { found?: boolean; total?: number; items?: Array<{ name: string; id: number }> }
+        if (!v.found) return { card: 'generic', title: 'Artifacts not accessible' }
+        const items = v.items ?? []
+        if (items.length === 0) return { card: 'generic', title: 'No artifacts' }
+        return { card: 'generic', title: `${v.total ?? items.length} artifact(s)`, content: [{ type: 'text', text: items.map(i => `#${i.id} ${i.name}`).join('\n') }] }
+      },
+      async execute(args, exec) {
+        if (!client.hasToken()) {
+          return { found: false, total: 0, items: [], reason: 'Listing repository artifacts requires a GitHub token with Actions read access.' }
+        }
+        const limit = args.limit === undefined ? 20 : Math.max(1, Math.min(args.limit as number, 100))
+        const result = await client.listArtifacts(args.owner as string, args.repo as string, { name: args.name as string | undefined, perPage: limit, signal: exec.signal })
+        return { found: true, ...result }
+      },
+    }),
+
+    defineTool({
+      name: 'github_list_run_artifacts',
+      description: 'List GitHub Actions artifacts produced by a workflow run. Requires a token with Actions read access.',
+      parameters: {
+        owner: { type: 'string', required: true, description: 'Repository owner' },
+        repo: { type: 'string', required: true, description: 'Repository name' },
+        runId: { type: 'integer', required: true, description: 'Workflow run id' },
+        limit: { type: 'integer', description: 'Maximum results, 1-100 (default 20)' },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            found: { type: 'boolean', description: 'Whether artifacts can be listed' },
+            total: { type: 'integer', description: 'Total artifact count' },
+            reason: { type: 'string', description: 'Explanation when artifacts are not accessible' },
+            items: {
+              type: 'array',
+              items: {
+                type: 'object',
+                additionalProperties: false,
+                properties: {
+                  id: { type: 'integer', description: 'Artifact id' },
+                  name: { type: 'string', description: 'Artifact name' },
+                  sizeInBytes: { type: 'integer', description: 'Artifact size in bytes' },
+                  expired: { type: 'boolean', description: 'Whether the artifact has expired' },
+                  createdAt: { type: 'string', description: 'ISO creation timestamp' },
+                  expiresAt: { oneOf: [{ type: 'string' }, { type: 'null' }], description: 'ISO expiration timestamp' },
+                  updatedAt: { type: 'string', description: 'ISO update timestamp' },
+                  archiveUrl: { oneOf: [{ type: 'string' }, { type: 'null' }], description: 'Archive download URL' },
+                  url: { type: 'string', description: 'Artifact API URL' },
+                  workflowRunId: { oneOf: [{ type: 'integer' }, { type: 'null' }], description: 'Workflow run id' },
+                  headBranch: { oneOf: [{ type: 'string' }, { type: 'null' }], description: 'Run head branch' },
+                  headSha: { oneOf: [{ type: 'string' }, { type: 'null' }], description: 'Run head SHA' },
+                },
+              },
+            },
+          },
+        },
+        render: (_args, value) => {
+          if (!value.found) return [{ type: 'text', text: 'Run artifacts are not accessible.' }]
+          const items = value.items ?? []
+          if (items.length === 0) return [{ type: 'text', text: 'No artifacts found.' }]
+          const lines = items.map(item => `${item.name} (#${item.id}, ${item.sizeInBytes} bytes, expires ${item.expiresAt ?? 'n/a'})`)
+          return [{ type: 'text', text: `Found ${value.total ?? items.length} artifacts:\n${lines.join('\n')}` }]
+        },
+      },
+      presentCall(args): ToolCallView {
+        return { card: 'generic', title: `Artifacts for CI run #${args.runId}`, kind: 'search' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { found?: boolean; total?: number; items?: Array<{ name: string; id: number }> }
+        if (!v.found) return { card: 'generic', title: 'Run artifacts not accessible' }
+        const items = v.items ?? []
+        if (items.length === 0) return { card: 'generic', title: 'No artifacts' }
+        return { card: 'generic', title: `${v.total ?? items.length} artifact(s)`, content: [{ type: 'text', text: items.map(i => `#${i.id} ${i.name}`).join('\n') }] }
+      },
+      async execute(args, exec) {
+        if (!client.hasToken()) {
+          return { found: false, total: 0, items: [], reason: 'Listing run artifacts requires a GitHub token with Actions read access.' }
+        }
+        const limit = args.limit === undefined ? 20 : Math.max(1, Math.min(args.limit as number, 100))
+        const result = await client.listRunArtifacts(args.owner as string, args.repo as string, args.runId as number, { perPage: limit, signal: exec.signal })
+        return { found: true, ...result }
+      },
+    }),
+
+    defineTool({
+      name: 'github_get_artifact',
+      description: 'Get metadata for one GitHub Actions artifact, including where it expires and its archive download URL. Requires a token with Actions read access.',
+      parameters: {
+        owner: { type: 'string', required: true, description: 'Repository owner' },
+        repo: { type: 'string', required: true, description: 'Repository name' },
+        artifactId: { type: 'integer', required: true, description: 'Artifact id' },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            found: { type: 'boolean', description: 'Whether the artifact exists and is accessible' },
+            id: { type: 'integer', description: 'Artifact id' },
+            name: { type: 'string', description: 'Artifact name' },
+            sizeInBytes: { type: 'integer', description: 'Artifact size in bytes' },
+            expired: { type: 'boolean', description: 'Whether the artifact has expired' },
+            createdAt: { type: 'string', description: 'ISO creation timestamp' },
+            expiresAt: { oneOf: [{ type: 'string' }, { type: 'null' }], description: 'ISO expiration timestamp' },
+            updatedAt: { type: 'string', description: 'ISO update timestamp' },
+            archiveUrl: { oneOf: [{ type: 'string' }, { type: 'null' }], description: 'Archive download URL' },
+            url: { type: 'string', description: 'Artifact API URL' },
+            workflowRunId: { oneOf: [{ type: 'integer' }, { type: 'null' }], description: 'Workflow run id' },
+            headBranch: { oneOf: [{ type: 'string' }, { type: 'null' }], description: 'Run head branch' },
+            headSha: { oneOf: [{ type: 'string' }, { type: 'null' }], description: 'Run head SHA' },
+            reason: { type: 'string', description: 'Explanation when the artifact is not accessible' },
+          },
+        },
+        render: (_args, value) => {
+          if (!value.found) return [{ type: 'text', text: 'Artifact not found or not accessible.' }]
+          return [{
+            type: 'text',
+            text: [
+              `${value.name} (#${value.id})`,
+              `size: ${value.sizeInBytes} bytes`,
+              `expired: ${value.expired}`,
+              `expires: ${value.expiresAt ?? 'n/a'}`,
+              `run: ${value.workflowRunId ?? 'n/a'} ${value.headBranch ?? ''} @ ${value.headSha ?? ''}`,
+              `archive: ${value.archiveUrl ?? 'n/a'}`,
+            ].filter(Boolean).join('\n'),
+          }]
+        },
+      },
+      presentCall(args): ToolCallView {
+        return { card: 'generic', title: `Artifact #${args.artifactId}`, kind: 'read' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { found?: boolean; id?: number; name?: string }
+        if (!v.found) return { card: 'generic', title: 'Artifact not found' }
+        return { card: 'generic', title: `Artifact #${v.id} ${v.name ?? ''}`.trim() }
+      },
+      async execute(args, exec) {
+        if (!client.hasToken()) {
+          return { found: false, reason: 'Getting an artifact requires a GitHub token with Actions read access.' }
+        }
+        try {
+          const artifact = await client.getArtifact(args.owner as string, args.repo as string, args.artifactId as number, exec.signal)
+          return { found: true, ...artifact }
+        } catch (error) {
+          if (error instanceof GithubError && error.status === 404) {
+            return { found: false }
+          }
+          throw error
+        }
+      },
+    }),
+
+    defineTool({
+      name: 'github_delete_artifact',
+      description: 'Delete a GitHub Actions artifact. WRITE operation: requires a token and permanently removes the artifact.',
+      parameters: {
+        owner: { type: 'string', required: true, description: 'Repository owner' },
+        repo: { type: 'string', required: true, description: 'Repository name' },
+        artifactId: { type: 'integer', required: true, description: 'Artifact id' },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            ok: { type: 'boolean', description: 'Whether the artifact was deleted' },
+            artifactId: { type: 'integer', description: 'Artifact id' },
+            reason: { type: 'string', description: 'Explanation when not deleted' },
+          },
+        },
+        render: (_args, value) => {
+          if (value.ok) return [{ type: 'text', text: `Deleted artifact #${value.artifactId}` }]
+          return [{ type: 'text', text: `Could not delete artifact #${value.artifactId}: ${value.reason}` }]
+        },
+      },
+      presentCall(args): ToolCallView {
+        return { card: 'generic', title: `Delete artifact #${args.artifactId}`, kind: 'edit' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { ok?: boolean; artifactId?: number; reason?: string }
+        if (v.ok) return { card: 'generic', title: `Artifact #${v.artifactId} deleted` }
+        return { card: 'generic', title: 'Delete artifact failed', content: [{ type: 'text', text: v.reason ?? 'Unknown' }] }
+      },
+      async execute(args, exec) {
+        if (!client.hasToken()) {
+          return { ok: false, artifactId: args.artifactId as number, reason: 'Deleting an artifact requires a GitHub token with Actions write access.' }
+        }
+        return client.deleteArtifact(args.owner as string, args.repo as string, args.artifactId as number, exec.signal)
+      },
+    }),
+
+    defineTool({
+      name: 'github_list_environments',
+      description: 'List deployment environments for a repository, including protection rules and deployment branch policy. Requires a token with environment management access.',
+      parameters: {
+        owner: { type: 'string', required: true, description: 'Repository owner' },
+        repo: { type: 'string', required: true, description: 'Repository name' },
+        limit: { type: 'integer', description: 'Maximum results, 1-100 (default 20)' },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            found: { type: 'boolean', description: 'Whether environments can be listed' },
+            total: { type: 'integer', description: 'Total environment count' },
+            reason: { type: 'string', description: 'Explanation when environments are not accessible' },
+            items: {
+              type: 'array',
+              items: {
+                type: 'object',
+                additionalProperties: false,
+                properties: {
+                  id: { type: 'integer', description: 'Environment id' },
+                  name: { type: 'string', description: 'Environment name' },
+                  url: { type: 'string', description: 'Environment API URL' },
+                  htmlUrl: { type: 'string', description: 'Environment page URL' },
+                  createdAt: { type: 'string', description: 'ISO creation timestamp' },
+                  updatedAt: { type: 'string', description: 'ISO update timestamp' },
+                  protectedBranches: { oneOf: [{ type: 'boolean' }, { type: 'null' }], description: 'Whether only protected branches can deploy' },
+                  customBranchPolicies: { oneOf: [{ type: 'boolean' }, { type: 'null' }], description: 'Whether custom branch policies are enabled' },
+                  protectionRules: {
+                    type: 'array',
+                    items: {
+                      type: 'object',
+                      additionalProperties: false,
+                      properties: {
+                        id: { type: 'integer', description: 'Protection rule id' },
+                        type: { type: 'string', description: 'Protection rule type' },
+                        waitTimer: { oneOf: [{ type: 'integer' }, { type: 'null' }], description: 'Required wait timer in minutes' },
+                        preventSelfReview: { oneOf: [{ type: 'boolean' }, { type: 'null' }], description: 'Whether the creator cannot review deployments' },
+                        reviewers: {
+                          type: 'array',
+                          items: {
+                            type: 'object',
+                            additionalProperties: false,
+                            properties: {
+                              type: { type: 'string', description: 'Reviewer type' },
+                              id: { type: 'integer', description: 'Reviewer user or team id' },
+                            },
+                          },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        render: (_args, value) => {
+          if (!value.found) return [{ type: 'text', text: 'Environments are not accessible.' }]
+          const items = value.items ?? []
+          if (items.length === 0) return [{ type: 'text', text: 'No environments found.' }]
+          const lines = items.map(env => {
+            const policy = env.protectedBranches ? 'protected branches' : env.customBranchPolicies ? 'custom branches' : 'all branches'
+            return `${env.name} (#${env.id}, ${(env.protectionRules ?? []).length} protection rule(s), ${policy})`
+          })
+          return [{ type: 'text', text: `Found ${value.total ?? items.length} environments:\n${lines.join('\n')}` }]
+        },
+      },
+      presentCall(args): ToolCallView {
+        return { card: 'generic', title: `Environments: ${args.owner}/${args.repo}`, kind: 'search' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { found?: boolean; total?: number; items?: Array<{ name: string }> }
+        if (!v.found) return { card: 'generic', title: 'Environments not accessible' }
+        const items = v.items ?? []
+        if (items.length === 0) return { card: 'generic', title: 'No environments' }
+        return { card: 'generic', title: `${v.total ?? items.length} environment(s)`, content: [{ type: 'text', text: items.map(i => i.name).join('\n') }] }
+      },
+      async execute(args, exec) {
+        if (!client.hasToken()) {
+          return { found: false, total: 0, items: [], reason: 'Listing environments requires a GitHub token with environment management access.' }
+        }
+        const limit = args.limit === undefined ? 20 : Math.max(1, Math.min(args.limit as number, 100))
+        return client.listEnvironments(args.owner as string, args.repo as string, { perPage: limit, signal: exec.signal })
+      },
+    }),
+
+    defineTool({
+      name: 'github_get_environment',
+      description: 'Get one deployment environment with its protection rules and deployment branch policy. Requires a token with environment management access.',
+      parameters: {
+        owner: { type: 'string', required: true, description: 'Repository owner' },
+        repo: { type: 'string', required: true, description: 'Repository name' },
+        environmentName: { type: 'string', required: true, description: 'Environment name' },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            found: { type: 'boolean', description: 'Whether the environment exists and is accessible' },
+            id: { type: 'integer', description: 'Environment id' },
+            name: { type: 'string', description: 'Environment name' },
+            url: { type: 'string', description: 'Environment API URL' },
+            htmlUrl: { type: 'string', description: 'Environment page URL' },
+            createdAt: { type: 'string', description: 'ISO creation timestamp' },
+            updatedAt: { type: 'string', description: 'ISO update timestamp' },
+            protectedBranches: { oneOf: [{ type: 'boolean' }, { type: 'null' }], description: 'Whether only protected branches can deploy' },
+            customBranchPolicies: { oneOf: [{ type: 'boolean' }, { type: 'null' }], description: 'Whether custom branch policies are enabled' },
+            reason: { type: 'string', description: 'Explanation when the environment is not accessible' },
+            protectionRules: {
+              type: 'array',
+              items: {
+                type: 'object',
+                additionalProperties: false,
+                properties: {
+                  id: { type: 'integer', description: 'Protection rule id' },
+                  type: { type: 'string', description: 'Protection rule type' },
+                  waitTimer: { oneOf: [{ type: 'integer' }, { type: 'null' }], description: 'Required wait timer in minutes' },
+                  preventSelfReview: { oneOf: [{ type: 'boolean' }, { type: 'null' }], description: 'Whether the creator cannot review deployments' },
+                  reviewers: {
+                    type: 'array',
+                    items: {
+                      type: 'object',
+                      additionalProperties: false,
+                      properties: {
+                        type: { type: 'string', description: 'Reviewer type' },
+                        id: { type: 'integer', description: 'Reviewer user or team id' },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        render: (_args, value) => {
+          if (!value.found) return [{ type: 'text', text: 'Environment not found or not accessible.' }]
+          const policy = value.protectedBranches ? 'protected branches' : value.customBranchPolicies ? 'custom branches' : 'all branches'
+          const rules = (value.protectionRules ?? []).map(rule => `${rule.type}${rule.waitTimer ? ` (wait ${rule.waitTimer}m)` : ''}`).join(', ') || 'none'
+          return [{
+            type: 'text',
+            text: [
+              `${value.name} (#${value.id})`,
+              `url: ${value.htmlUrl}`,
+              `deployment policy: ${policy}`,
+              `protection: ${rules}`,
+              `created: ${value.createdAt}`,
+              `updated: ${value.updatedAt}`,
+            ].join('\n'),
+          }]
+        },
+      },
+      presentCall(args): ToolCallView {
+        return { card: 'generic', title: `Environment ${args.environmentName}`, kind: 'read' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { found?: boolean; name?: string; htmlUrl?: string }
+        if (!v.found) return { card: 'generic', title: 'Environment not found' }
+        return { card: 'generic', title: `Environment ${v.name}`, content: [{ type: 'text', text: v.htmlUrl ?? '' }] }
+      },
+      async execute(args, exec) {
+        if (!client.hasToken()) {
+          return { found: false, reason: 'Getting an environment requires a GitHub token with environment management access.' }
+        }
+        try {
+          const environment = await client.getEnvironment(args.owner as string, args.repo as string, args.environmentName as string, exec.signal)
+          return { found: true, ...environment }
+        } catch (error) {
+          if (error instanceof GithubError && error.status === 404) {
+            return { found: false }
+          }
+          throw error
+        }
+      },
+    }),
+
+    defineTool({
+      name: 'github_update_environment',
+      description: 'Create or update a deployment environment with wait timer, self-review protection, reviewers, and deployment branch policy. WRITE operation: requires a token.',
+      parameters: {
+        owner: { type: 'string', required: true, description: 'Repository owner' },
+        repo: { type: 'string', required: true, description: 'Repository name' },
+        name: { type: 'string', required: true, description: 'Environment name' },
+        waitTimer: { type: 'integer', description: 'Required wait timer in minutes (default 0)' },
+        preventSelfReview: { type: 'boolean', description: 'Whether the deployment creator cannot approve their own deployment (default false)' },
+        protectedBranches: { type: 'boolean', description: 'Only protected branches may deploy' },
+        customBranchPolicies: { type: 'boolean', description: 'Use custom branch policies for deployments' },
+        reviewers: {
+          type: 'array',
+          items: {
+            type: 'object',
+            additionalProperties: false,
+            properties: {
+              type: { type: 'string', description: 'Reviewer type: User or Team' },
+              id: { type: 'integer', required: true, description: 'Reviewer user or team id' },
+            },
+          },
+          description: 'Reviewers who approve deployments (empty clears reviewers)',
+        },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            ok: { type: 'boolean', description: 'Whether the environment was saved' },
+            name: { type: 'string', description: 'Environment name' },
+            url: { type: 'string', description: 'Environment page URL' },
+            reason: { type: 'string', description: 'Explanation when not saved' },
+          },
+        },
+        render: (_args, value) => {
+          if (value.ok) return [{ type: 'text', text: `Saved environment ${value.name}: ${value.url}` }]
+          return [{ type: 'text', text: `Could not save environment ${value.name}: ${value.reason}` }]
+        },
+      },
+      presentCall(args): ToolCallView {
+        return { card: 'generic', title: `Update environment ${args.name}`, kind: 'edit' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { ok?: boolean; name?: string; url?: string; reason?: string }
+        if (v.ok) return { card: 'generic', title: `Environment ${v.name} saved`, content: [{ type: 'text', text: v.url ?? '' }] }
+        return { card: 'generic', title: 'Update environment failed', content: [{ type: 'text', text: v.reason ?? 'Unknown' }] }
+      },
+      async execute(args, exec) {
+        if (!client.hasToken()) {
+          return { ok: false, name: args.name as string, reason: 'Updating an environment requires a GitHub token with environment management access.' }
+        }
+        if (args.protectedBranches && args.customBranchPolicies) {
+          return { ok: false, name: args.name as string, reason: 'Only one deployment branch policy can be enabled at a time.' }
+        }
+        return client.updateEnvironment(args.owner as string, args.repo as string, args.name as string, {
+          waitTimer: args.waitTimer as number | undefined,
+          preventSelfReview: args.preventSelfReview as boolean | undefined,
+          reviewers: args.reviewers as Array<{ type: 'User' | 'Team'; id: number }> | undefined,
+          protectedBranches: args.protectedBranches as boolean | undefined,
+          customBranchPolicies: args.customBranchPolicies as boolean | undefined,
+        }, exec.signal)
+      },
+    }),
+
+    defineTool({
+      name: 'github_delete_environment',
+      description: 'Delete a deployment environment. WRITE operation: requires a token and permanently removes the environment.',
+      parameters: {
+        owner: { type: 'string', required: true, description: 'Repository owner' },
+        repo: { type: 'string', required: true, description: 'Repository name' },
+        name: { type: 'string', required: true, description: 'Environment name' },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            ok: { type: 'boolean', description: 'Whether the environment was deleted' },
+            name: { type: 'string', description: 'Environment name' },
+            reason: { type: 'string', description: 'Explanation when not deleted' },
+          },
+        },
+        render: (_args, value) => {
+          if (value.ok) return [{ type: 'text', text: `Deleted environment ${value.name}` }]
+          return [{ type: 'text', text: `Could not delete environment ${value.name}: ${value.reason}` }]
+        },
+      },
+      presentCall(args): ToolCallView {
+        return { card: 'generic', title: `Delete environment ${args.name}`, kind: 'edit' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { ok?: boolean; name?: string; reason?: string }
+        if (v.ok) return { card: 'generic', title: `Environment ${v.name} deleted` }
+        return { card: 'generic', title: 'Delete environment failed', content: [{ type: 'text', text: v.reason ?? 'Unknown' }] }
+      },
+      async execute(args, exec) {
+        if (!client.hasToken()) {
+          return { ok: false, name: args.name as string, reason: 'Deleting an environment requires a GitHub token with environment management access.' }
+        }
+        return client.deleteEnvironment(args.owner as string, args.repo as string, args.name as string, exec.signal)
+      },
+    }),
   ]
 }

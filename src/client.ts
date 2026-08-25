@@ -391,6 +391,66 @@ export interface WorkflowDispatchResult {
   reason?: string
 }
 
+export interface WorkflowArtifactItem {
+  id: number
+  name: string
+  sizeInBytes: number
+  expired: boolean
+  createdAt: string
+  expiresAt: string | null
+  updatedAt: string
+  archiveUrl: string | null
+  url: string
+  workflowRunId: number | null
+  headBranch: string | null
+  headSha: string | null
+}
+
+export interface ArtifactListResult {
+  total: number
+  items: WorkflowArtifactItem[]
+}
+
+export interface ArtifactWriteResult {
+  ok: boolean
+  artifactId?: number
+  reason?: string
+}
+
+export interface EnvironmentProtectionRule {
+  id: number
+  type: string
+  waitTimer: number | null
+  preventSelfReview: boolean | null
+  reviewers: Array<{ type: string; id: number }>
+}
+
+export interface EnvironmentItem {
+  id: number
+  name: string
+  url: string
+  htmlUrl: string
+  createdAt: string
+  updatedAt: string
+  protectionRules: EnvironmentProtectionRule[]
+  protectedBranches: boolean | null
+  customBranchPolicies: boolean | null
+}
+
+export interface EnvironmentListResult {
+  found: boolean
+  total: number
+  items: EnvironmentItem[]
+  reason?: string
+}
+
+export interface EnvironmentWriteResult {
+  ok: boolean
+  name?: string
+  url?: string
+  reason?: string
+}
+
 export interface BranchCreateResult {
   ok: boolean
   name?: string
@@ -491,6 +551,82 @@ function parseWorkflowLogZip(buffer: ArrayBuffer): string {
     offset = next
   }
   return parts.join('\n')
+}
+
+interface RawWorkflowArtifact {
+  id: number
+  name: string
+  size_in_bytes: number
+  expired: boolean
+  created_at: string
+  expires_at: string | null
+  updated_at: string
+  archive_download_url: string | null
+  url: string
+  workflow_run?: {
+    id: number
+    head_branch: string
+    head_sha: string
+  } | null
+}
+
+interface RawEnvironmentProtectionRule {
+  id: number
+  type: string
+  wait_timer?: number | null
+  prevent_self_review?: boolean | null
+  reviewers?: Array<{ type: string; id: number }> | null
+}
+
+interface RawEnvironment {
+  id: number
+  name: string
+  url: string
+  html_url: string
+  created_at: string
+  updated_at: string
+  protection_rules?: RawEnvironmentProtectionRule[] | null
+  deployment_branch_policy?: {
+    protected_branches: boolean
+    custom_branch_policies: boolean
+  } | null
+}
+
+function mapWorkflowArtifact(raw: RawWorkflowArtifact): WorkflowArtifactItem {
+  return {
+    id: raw.id,
+    name: raw.name,
+    sizeInBytes: raw.size_in_bytes,
+    expired: raw.expired,
+    createdAt: raw.created_at,
+    expiresAt: raw.expires_at,
+    updatedAt: raw.updated_at,
+    archiveUrl: raw.archive_download_url,
+    url: raw.url,
+    workflowRunId: raw.workflow_run?.id ?? null,
+    headBranch: raw.workflow_run?.head_branch ?? null,
+    headSha: raw.workflow_run?.head_sha ?? null,
+  }
+}
+
+function mapEnvironment(raw: RawEnvironment): EnvironmentItem {
+  return {
+    id: raw.id,
+    name: raw.name,
+    url: raw.url,
+    htmlUrl: raw.html_url,
+    createdAt: raw.created_at,
+    updatedAt: raw.updated_at,
+    protectionRules: (raw.protection_rules ?? []).map(rule => ({
+      id: rule.id,
+      type: rule.type,
+      waitTimer: rule.wait_timer ?? null,
+      preventSelfReview: rule.prevent_self_review ?? null,
+      reviewers: rule.reviewers?.map(reviewer => ({ type: reviewer.type, id: reviewer.id })) ?? [],
+    })),
+    protectedBranches: raw.deployment_branch_policy?.protected_branches ?? null,
+    customBranchPolicies: raw.deployment_branch_policy?.custom_branch_policies ?? null,
+  }
 }
 
 export class GithubClient {
@@ -834,6 +970,137 @@ export class GithubClient {
     } catch (error) {
       if (error instanceof GithubError && (error.status === 404 || error.status === 422)) {
         return { ok: false, commentId: input.commentId, reason: 'Could not reply to the PR review comment (not found or invalid reply).' }
+      }
+      throw error
+    }
+  }
+
+  async listArtifacts(owner: string, repo: string, options: { name?: string; perPage?: number; signal?: AbortSignal } = {}): Promise<ArtifactListResult> {
+    const params = new URLSearchParams({
+      per_page: String(Math.max(1, Math.min(options.perPage ?? 20, 100))),
+    })
+    if (options.name) params.set('name', options.name)
+    const data = await this.request<{ total_count: number; artifacts: RawWorkflowArtifact[] }>(
+      `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/actions/artifacts?${params}`,
+      { signal: options.signal },
+    )
+    return { total: data.total_count, items: data.artifacts.map(mapWorkflowArtifact) }
+  }
+
+  async listRunArtifacts(owner: string, repo: string, runId: number, options: { perPage?: number; signal?: AbortSignal } = {}): Promise<ArtifactListResult> {
+    const params = new URLSearchParams({
+      per_page: String(Math.max(1, Math.min(options.perPage ?? 20, 100))),
+    })
+    const data = await this.request<{ total_count: number; artifacts: RawWorkflowArtifact[] }>(
+      `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/actions/runs/${runId}/artifacts?${params}`,
+      { signal: options.signal },
+    )
+    return { total: data.total_count, items: data.artifacts.map(mapWorkflowArtifact) }
+  }
+
+  async getArtifact(owner: string, repo: string, artifactId: number, signal?: AbortSignal): Promise<WorkflowArtifactItem> {
+    const data = await this.request<RawWorkflowArtifact>(
+      `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/actions/artifacts/${artifactId}`,
+      { signal },
+    )
+    return mapWorkflowArtifact(data)
+  }
+
+  async deleteArtifact(owner: string, repo: string, artifactId: number, signal?: AbortSignal): Promise<ArtifactWriteResult> {
+    try {
+      await this.request<unknown>(
+        `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/actions/artifacts/${artifactId}`,
+        { method: 'DELETE', signal },
+      )
+      return { ok: true, artifactId }
+    } catch (error) {
+      if (error instanceof GithubError && (error.status === 404 || error.status === 422)) {
+        return { ok: false, artifactId, reason: 'Could not delete the workflow artifact (not found or invalid).' }
+      }
+      throw error
+    }
+  }
+
+  async listEnvironments(owner: string, repo: string, options: { perPage?: number; signal?: AbortSignal } = {}): Promise<EnvironmentListResult> {
+    const params = new URLSearchParams({
+      per_page: String(Math.max(1, Math.min(options.perPage ?? 20, 100))),
+    })
+    try {
+      const data = await this.request<{ total_count: number; environments: RawEnvironment[] }>(
+        `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/environments?${params}`,
+        { signal: options.signal },
+      )
+      return {
+        found: true,
+        total: data.total_count,
+        items: (data.environments ?? []).map(mapEnvironment),
+      }
+    } catch (error) {
+      if (error instanceof GithubError && error.status === 404) {
+        return { found: false, total: 0, items: [] }
+      }
+      throw error
+    }
+  }
+
+  async getEnvironment(owner: string, repo: string, environmentName: string, signal?: AbortSignal): Promise<EnvironmentItem> {
+    const data = await this.request<RawEnvironment>(
+      `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/environments/${encodeURIComponent(environmentName)}`,
+      { signal },
+    )
+    return mapEnvironment(data)
+  }
+
+  async updateEnvironment(
+    owner: string,
+    repo: string,
+    environmentName: string,
+    input: {
+      waitTimer?: number
+      preventSelfReview?: boolean
+      reviewers?: Array<{ type: 'User' | 'Team'; id: number }>
+      protectedBranches?: boolean
+      customBranchPolicies?: boolean
+    },
+    signal?: AbortSignal,
+  ): Promise<EnvironmentWriteResult> {
+    const body: Record<string, unknown> = {
+      wait_timer: input.waitTimer ?? 0,
+      prevent_self_review: input.preventSelfReview ?? false,
+    }
+    if (input.reviewers !== undefined) {
+      body.reviewers = input.reviewers.map(reviewer => ({ type: reviewer.type, id: reviewer.id }))
+    }
+    if (input.protectedBranches !== undefined || input.customBranchPolicies !== undefined) {
+      body.deployment_branch_policy = {
+        protected_branches: input.protectedBranches ?? false,
+        custom_branch_policies: input.customBranchPolicies ?? false,
+      }
+    }
+    try {
+      const data = await this.request<RawEnvironment>(
+        `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/environments/${encodeURIComponent(environmentName)}`,
+        { method: 'PUT', body, signal },
+      )
+      return { ok: true, name: data.name, url: data.html_url }
+    } catch (error) {
+      if (error instanceof GithubError && (error.status === 404 || error.status === 422)) {
+        return { ok: false, name: environmentName, reason: 'Could not update the deployment environment (not found or invalid settings).' }
+      }
+      throw error
+    }
+  }
+
+  async deleteEnvironment(owner: string, repo: string, environmentName: string, signal?: AbortSignal): Promise<EnvironmentWriteResult> {
+    try {
+      await this.request<unknown>(
+        `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/environments/${encodeURIComponent(environmentName)}`,
+        { method: 'DELETE', signal },
+      )
+      return { ok: true, name: environmentName }
+    } catch (error) {
+      if (error instanceof GithubError && (error.status === 404 || error.status === 422)) {
+        return { ok: false, name: environmentName, reason: 'Could not delete the deployment environment (not found or invalid).' }
       }
       throw error
     }

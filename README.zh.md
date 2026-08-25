@@ -83,11 +83,19 @@ npm install /path/to/dsh-tool-github
 | `github_get_workflow_run` | 查看 workflow run 详情 | 否* |
 | `github_list_workflow_jobs` | 查看 run 的 job 与步骤 | 否* |
 | `github_get_workflow_run_logs` | 下载并解码 workflow run 日志（上限 20 万字符） | 否* |
+| `github_list_repo_artifacts` | 列出仓库 Actions artifacts（过期时间、下载元信息） | 是 |
+| `github_list_run_artifacts` | 列出 workflow run 产生的 artifacts | 是 |
+| `github_get_artifact` | 查看单个 Actions artifact 及 archive 下载 URL | 是 |
+| `github_delete_artifact` | 删除 Actions artifact | 是 |
 | `github_rerun_workflow_run` | 重新运行 workflow run | 是 |
 | `github_cancel_workflow_run` | 取消进行中的 workflow run | 是 |
 | `github_dispatch_workflow` | 触发 workflow_dispatch（ref + 字符串 inputs） | 是 |
 | `github_create_branch` | 创建分支（从指定 ref） | 是 |
 | `github_write_file` | 创建/更新文件（自动提交） | 是 |
+| `github_list_environments` | 列出部署环境、保护规则与分支策略 | 是 |
+| `github_get_environment` | 查看单个部署环境及其策略 | 是 |
+| `github_update_environment` | 创建/更新等待时间、评审人与分支策略 | 是 |
+| `github_delete_environment` | 删除部署环境 | 是 |
 | `github_get_readme` | 读取仓库 README（markdown） | 否 |
 | `github_list_tags` | 列出版本标签 | 否 |
 | `github_star_repo` | star 仓库 | 是 |

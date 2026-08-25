@@ -907,3 +907,181 @@ describe('GithubClient stage 15', () => {
     }
   })
 })
+
+describe('GithubClient stage 16', () => {
+  it('listArtifacts builds the repo query and maps workflow metadata', async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse(200, {
+      total_count: 1,
+      artifacts: [{
+        id: 10,
+        name: 'build.zip',
+        size_in_bytes: 5120,
+        expired: false,
+        created_at: '2026-08-25T00:00:00Z',
+        expires_at: '2026-09-01T00:00:00Z',
+        updated_at: '2026-08-25T00:01:00Z',
+        archive_download_url: 'https://archive.example/build.zip',
+        url: 'https://api.github.com/repos/a/b/actions/artifacts/10',
+        workflow_run: { id: 7, head_branch: 'main', head_sha: 'abc123' },
+      }],
+    }))
+    const client = new GithubClient({ token: 'ghp_test', fetchImpl })
+    const result = await client.listArtifacts('a', 'b', { name: 'build', perPage: 50 })
+    expect(result).toEqual({
+      total: 1,
+      items: [{
+        id: 10,
+        name: 'build.zip',
+        sizeInBytes: 5120,
+        expired: false,
+        createdAt: '2026-08-25T00:00:00Z',
+        expiresAt: '2026-09-01T00:00:00Z',
+        updatedAt: '2026-08-25T00:01:00Z',
+        archiveUrl: 'https://archive.example/build.zip',
+        url: 'https://api.github.com/repos/a/b/actions/artifacts/10',
+        workflowRunId: 7,
+        headBranch: 'main',
+        headSha: 'abc123',
+      }],
+    })
+    const [url] = fetchImpl.mock.calls[0] as [string]
+    expect(url).toContain('/repos/a/b/actions/artifacts?')
+    expect(url).toContain('name=build')
+    expect(url).toContain('per_page=50')
+  })
+
+  it('listRunArtifacts hits the run-specific endpoint', async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse(200, { total_count: 0, artifacts: [] }))
+    const client = new GithubClient({ token: 'ghp_test', fetchImpl })
+    expect(await client.listRunArtifacts('a', 'b', 9, { perPage: 5 })).toEqual({ total: 0, items: [] })
+    const [url] = fetchImpl.mock.calls[0] as [string]
+    expect(url).toContain('/repos/a/b/actions/runs/9/artifacts?')
+    expect(url).toContain('per_page=5')
+  })
+
+  it('getArtifact maps one artifact and deleteArtifact maps 204 and 404', async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse(200, {
+      id: 10,
+      name: 'build.zip',
+      size_in_bytes: 5120,
+      expired: true,
+      created_at: '2026-08-25T00:00:00Z',
+      expires_at: null,
+      updated_at: '2026-08-25T00:01:00Z',
+      archive_download_url: null,
+      url: 'https://api.github.com/repos/a/b/actions/artifacts/10',
+      workflow_run: null,
+    }))
+    const client = new GithubClient({ token: 'ghp_test', fetchImpl })
+    expect(await client.getArtifact('a', 'b', 10)).toMatchObject({ id: 10, name: 'build.zip', expired: true, workflowRunId: null })
+
+    const deleteClient = new GithubClient({ token: 'ghp_test', fetchImpl: vi.fn(async () => new Response(null, { status: 204 })) })
+    expect(await deleteClient.deleteArtifact('a', 'b', 10)).toEqual({ ok: true, artifactId: 10 })
+
+    const failed = new GithubClient({ token: 'ghp_test', fetchImpl: vi.fn(async () => jsonResponse(404, {})) })
+    expect((await failed.deleteArtifact('a', 'b', 10)).ok).toBe(false)
+  })
+
+  it('listEnvironments maps protection rules and policy and returns not found on 404', async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse(200, {
+      total_count: 1,
+      environments: [{
+        id: 5,
+        name: 'prod',
+        url: 'https://api.github.com/repos/a/b/environments/prod',
+        html_url: 'https://github.com/a/b/environments/prod',
+        created_at: '2026-08-25T00:00:00Z',
+        updated_at: '2026-08-25T00:01:00Z',
+        protection_rules: [{
+          id: 1,
+          type: 'wait_timer',
+          wait_timer: 30,
+          prevent_self_review: true,
+          reviewers: null,
+        }],
+        deployment_branch_policy: { protected_branches: true, custom_branch_policies: false },
+      }],
+    }))
+    const client = new GithubClient({ token: 'ghp_test', fetchImpl })
+    const result = await client.listEnvironments('a', 'b', { perPage: 10 })
+    expect(result).toEqual({
+      found: true,
+      total: 1,
+      items: [{
+        id: 5,
+        name: 'prod',
+        url: 'https://api.github.com/repos/a/b/environments/prod',
+        htmlUrl: 'https://github.com/a/b/environments/prod',
+        createdAt: '2026-08-25T00:00:00Z',
+        updatedAt: '2026-08-25T00:01:00Z',
+        protectionRules: [{ id: 1, type: 'wait_timer', waitTimer: 30, preventSelfReview: true, reviewers: [] }],
+        protectedBranches: true,
+        customBranchPolicies: false,
+      }],
+    })
+    const [url] = fetchImpl.mock.calls[0] as [string]
+    expect(url).toContain('/repos/a/b/environments?')
+    expect(url).toContain('per_page=10')
+
+    const missing = new GithubClient({ token: 'ghp_test', fetchImpl: vi.fn(async () => jsonResponse(404, {})) })
+    expect(await missing.listEnvironments('a', 'b')).toEqual({ found: false, total: 0, items: [] })
+  })
+
+  it('getEnvironment and updateEnvironment map settings and errors', async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse(200, {
+      id: 5,
+      name: 'prod',
+      url: 'https://api.github.com/repos/a/b/environments/prod',
+      html_url: 'https://github.com/a/b/environments/prod',
+      created_at: '2026-08-25T00:00:00Z',
+      updated_at: '2026-08-25T00:01:00Z',
+      protection_rules: [],
+      deployment_branch_policy: null,
+    }))
+    const client = new GithubClient({ token: 'ghp_test', fetchImpl })
+    expect(await client.getEnvironment('a', 'b', 'prod')).toMatchObject({ id: 5, name: 'prod', protectedBranches: null })
+
+    const updateFetch = vi.fn(async () => jsonResponse(200, {
+      id: 5,
+      name: 'prod',
+      url: 'https://api.github.com/repos/a/b/environments/prod',
+      html_url: 'https://github.com/a/b/environments/prod',
+      created_at: '2026-08-25T00:00:00Z',
+      updated_at: '2026-08-25T00:01:00Z',
+      protection_rules: [],
+      deployment_branch_policy: null,
+    }))
+    const updateClient = new GithubClient({ token: 'ghp_test', fetchImpl: updateFetch })
+    const result = await updateClient.updateEnvironment('a', 'b', 'prod', {
+      waitTimer: 15,
+      preventSelfReview: true,
+      reviewers: [{ type: 'User', id: 2 }],
+      protectedBranches: true,
+    })
+    const [updateUrl, updateInit] = updateFetch.mock.calls[0] as [string, RequestInit]
+    expect(updateUrl).toContain('/repos/a/b/environments/prod')
+    expect(updateInit.method).toBe('PUT')
+    expect(JSON.parse(String(updateInit.body))).toEqual({
+      wait_timer: 15,
+      prevent_self_review: true,
+      reviewers: [{ type: 'User', id: 2 }],
+      deployment_branch_policy: { protected_branches: true, custom_branch_policies: false },
+    })
+    expect(result).toEqual({ ok: true, name: 'prod', url: 'https://github.com/a/b/environments/prod' })
+
+    const failed = new GithubClient({ token: 'ghp_test', fetchImpl: vi.fn(async () => jsonResponse(422, {})) })
+    expect((await failed.updateEnvironment('a', 'b', 'prod', { waitTimer: 30 })).ok).toBe(false)
+  })
+
+  it('deleteEnvironment deletes and maps errors', async () => {
+    const fetchImpl = vi.fn(async () => new Response(null, { status: 204 }))
+    const client = new GithubClient({ token: 'ghp_test', fetchImpl })
+    expect(await client.deleteEnvironment('a', 'b', 'prod')).toEqual({ ok: true, name: 'prod' })
+    const [url, init] = fetchImpl.mock.calls[0] as [string, RequestInit]
+    expect(url).toContain('/repos/a/b/environments/prod')
+    expect(init.method).toBe('DELETE')
+
+    const failed = new GithubClient({ token: 'ghp_test', fetchImpl: vi.fn(async () => jsonResponse(404, {})) })
+    expect((await failed.deleteEnvironment('a', 'b', 'prod')).ok).toBe(false)
+  })
+})

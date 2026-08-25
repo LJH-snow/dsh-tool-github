@@ -25,11 +25,15 @@ describe('tool definitions', () => {
       'github_create_pr_draft',
       'github_create_release',
       'github_create_repository',
+      'github_delete_artifact',
       'github_delete_branch_protection',
+      'github_delete_environment',
       'github_delete_repo_secret',
       'github_delete_repo_variable',
       'github_dispatch_workflow',
+      'github_get_artifact',
       'github_get_branch_protection',
+      'github_get_environment',
       'github_get_file',
       'github_get_issue',
       'github_get_pull_request',
@@ -41,6 +45,7 @@ describe('tool definitions', () => {
       'github_get_workflow_run_logs',
       'github_list_branches',
       'github_list_commits',
+      'github_list_environments',
       'github_list_gists',
       'github_list_issue_comments',
       'github_list_issues',
@@ -49,8 +54,10 @@ describe('tool definitions', () => {
       'github_list_prs',
       'github_list_pull_request_reviews',
       'github_list_releases',
+      'github_list_repo_artifacts',
       'github_list_repo_secrets',
       'github_list_repo_variables',
+      'github_list_run_artifacts',
       'github_list_tags',
       'github_list_workflow_jobs',
       'github_list_workflow_runs',
@@ -70,6 +77,7 @@ describe('tool definitions', () => {
       'github_star_repo',
       'github_submit_pr_review',
       'github_unstar_repo',
+      'github_update_environment',
       'github_update_issue',
       'github_write_file',
     ])
@@ -176,11 +184,15 @@ describe('extended tools (stage 5)', () => {
       'github_create_pr_draft',
       'github_create_release',
       'github_create_repository',
+      'github_delete_artifact',
       'github_delete_branch_protection',
+      'github_delete_environment',
       'github_delete_repo_secret',
       'github_delete_repo_variable',
       'github_dispatch_workflow',
+      'github_get_artifact',
       'github_get_branch_protection',
+      'github_get_environment',
       'github_get_file',
       'github_get_issue',
       'github_get_pull_request',
@@ -192,6 +204,7 @@ describe('extended tools (stage 5)', () => {
       'github_get_workflow_run_logs',
       'github_list_branches',
       'github_list_commits',
+      'github_list_environments',
       'github_list_gists',
       'github_list_issue_comments',
       'github_list_issues',
@@ -200,8 +213,10 @@ describe('extended tools (stage 5)', () => {
       'github_list_prs',
       'github_list_pull_request_reviews',
       'github_list_releases',
+      'github_list_repo_artifacts',
       'github_list_repo_secrets',
       'github_list_repo_variables',
+      'github_list_run_artifacts',
       'github_list_tags',
       'github_list_workflow_jobs',
       'github_list_workflow_runs',
@@ -221,6 +236,7 @@ describe('extended tools (stage 5)', () => {
       'github_star_repo',
       'github_submit_pr_review',
       'github_unstar_repo',
+      'github_update_environment',
       'github_update_issue',
       'github_write_file',
     ])
@@ -675,5 +691,127 @@ describe('stage 15 tools', () => {
     expect(defs['github_add_issue_assignees'].presentCall({ owner: 'a', repo: 'b', issueNumber: 8, assignees: ['alice'] })).toMatchObject({ kind: 'edit' })
     expect(defs['github_set_issue_milestone'].presentCall({ owner: 'a', repo: 'b', issueNumber: 8, milestoneNumber: 3 })).toMatchObject({ kind: 'edit' })
     expect(defs['github_reply_pr_comment'].presentCall({ owner: 'a', repo: 'b', prNumber: 8, commentId: 12, body: 'Thanks' })).toMatchObject({ kind: 'edit' })
+  })
+})
+
+describe('stage 16 tools', () => {
+  it('all artifact and environment tools require a token', async () => {
+    const noToken = Object.fromEntries(createTools(new GithubClient({ fetchImpl: vi.fn() })).map(t => [t.name, t]))
+    const cases: Array<{ name: string; args: Record<string, unknown> }> = [
+      { name: 'github_list_repo_artifacts', args: { owner: 'a', repo: 'b' } },
+      { name: 'github_list_run_artifacts', args: { owner: 'a', repo: 'b', runId: 1 } },
+      { name: 'github_get_artifact', args: { owner: 'a', repo: 'b', artifactId: 1 } },
+      { name: 'github_delete_artifact', args: { owner: 'a', repo: 'b', artifactId: 1 } },
+      { name: 'github_list_environments', args: { owner: 'a', repo: 'b' } },
+      { name: 'github_get_environment', args: { owner: 'a', repo: 'b', environmentName: 'prod' } },
+      { name: 'github_update_environment', args: { owner: 'a', repo: 'b', name: 'prod' } },
+      { name: 'github_delete_environment', args: { owner: 'a', repo: 'b', name: 'prod' } },
+    ]
+    for (const { name, args } of cases) {
+      const result = await noToken[name].execute(args, exec()) as Record<string, unknown>
+      expect(result.reason).toContain('token')
+      if (name.startsWith('github_list') || name.startsWith('github_get')) {
+        expect(result.found).toBe(false)
+      } else {
+        expect(result.ok).toBe(false)
+      }
+    }
+  })
+
+  it('artifact reads pass through with a token and get_artifact returns found:false on 404', async () => {
+    const listFetch = vi.fn(async () => jsonResponse(200, {
+      total_count: 1,
+      artifacts: [{
+        id: 10,
+        name: 'build.zip',
+        size_in_bytes: 5120,
+        expired: false,
+        created_at: '2026-08-25T00:00:00Z',
+        expires_at: '2026-09-01T00:00:00Z',
+        updated_at: '2026-08-25T00:01:00Z',
+        archive_download_url: 'https://archive.example/build.zip',
+        url: 'https://api.github.com/repos/a/b/actions/artifacts/10',
+        workflow_run: { id: 7, head_branch: 'main', head_sha: 'abc123' },
+      }],
+    }))
+    const listTool = createTools(new GithubClient({ token: 'ghp_test', fetchImpl: listFetch })).find(t => t.name === 'github_list_repo_artifacts')!
+    const listed = await listTool.execute({ owner: 'a', repo: 'b', name: 'build', limit: 50 }, exec())
+    expect(listed).toMatchObject({ found: true, total: 1, items: [{ id: 10, name: 'build.zip' }] })
+    expect(String(listFetch.mock.calls[0][0])).toContain('name=build')
+
+    const runFetch = vi.fn(async () => jsonResponse(200, { total_count: 0, artifacts: [] }))
+    const runTool = createTools(new GithubClient({ token: 'ghp_test', fetchImpl: runFetch })).find(t => t.name === 'github_list_run_artifacts')!
+    expect(await runTool.execute({ owner: 'a', repo: 'b', runId: 9 }, exec())).toEqual({ found: true, total: 0, items: [] })
+    expect(String(runFetch.mock.calls[0][0])).toContain('/actions/runs/9/artifacts')
+
+    const missing = createTools(new GithubClient({ token: 'ghp_test', fetchImpl: vi.fn(async () => jsonResponse(404, {})) })).find(t => t.name === 'github_get_artifact')!
+    expect(await missing.execute({ owner: 'a', repo: 'b', artifactId: 10 }, exec())).toEqual({ found: false })
+  })
+
+  it('environment reads and writes pass through with a token', async () => {
+    const envPayload = {
+      id: 5,
+      name: 'prod',
+      url: 'https://api.github.com/repos/a/b/environments/prod',
+      html_url: 'https://github.com/a/b/environments/prod',
+      created_at: '2026-08-25T00:00:00Z',
+      updated_at: '2026-08-25T00:01:00Z',
+      protection_rules: [],
+      deployment_branch_policy: { protected_branches: true, custom_branch_policies: false },
+    }
+
+    const listFetch = vi.fn(async () => jsonResponse(200, { total_count: 1, environments: [envPayload] }))
+    const listTool = createTools(new GithubClient({ token: 'ghp_test', fetchImpl: listFetch })).find(t => t.name === 'github_list_environments')!
+    expect(await listTool.execute({ owner: 'a', repo: 'b' }, exec())).toMatchObject({ found: true, total: 1, items: [{ name: 'prod', protectedBranches: true }] })
+
+    const getFetch = vi.fn(async () => jsonResponse(200, envPayload))
+    const getTool = createTools(new GithubClient({ token: 'ghp_test', fetchImpl: getFetch })).find(t => t.name === 'github_get_environment')!
+    expect(await getTool.execute({ owner: 'a', repo: 'b', environmentName: 'prod' }, exec())).toMatchObject({ found: true, name: 'prod' })
+
+    const updateFetch = vi.fn(async () => jsonResponse(200, envPayload))
+    const updateTool = createTools(new GithubClient({ token: 'ghp_test', fetchImpl: updateFetch })).find(t => t.name === 'github_update_environment')!
+    expect(await updateTool.execute({
+      owner: 'a',
+      repo: 'b',
+      name: 'prod',
+      waitTimer: 15,
+      preventSelfReview: true,
+      reviewers: [{ type: 'User', id: 2 }],
+      protectedBranches: true,
+    }, exec())).toMatchObject({ ok: true, name: 'prod' })
+    const [, updateInit] = updateFetch.mock.calls[0] as [string, RequestInit]
+    expect(JSON.parse(String(updateInit.body))).toEqual({
+      wait_timer: 15,
+      prevent_self_review: true,
+      reviewers: [{ type: 'User', id: 2 }],
+      deployment_branch_policy: { protected_branches: true, custom_branch_policies: false },
+    })
+
+    const invalidFetch = vi.fn()
+    const invalidTool = createTools(new GithubClient({ token: 'ghp_test', fetchImpl: invalidFetch })).find(t => t.name === 'github_update_environment')!
+    const invalid = await invalidTool.execute({ owner: 'a', repo: 'b', name: 'prod', protectedBranches: true, customBranchPolicies: true }, exec())
+    expect(invalid).toMatchObject({ ok: false })
+    expect(invalid.reason).toContain('policy')
+    expect(invalidFetch).not.toHaveBeenCalled()
+
+    const deleteArtifactFetch = vi.fn(async () => new Response(null, { status: 204 }))
+    const deleteArtifactTool = createTools(new GithubClient({ token: 'ghp_test', fetchImpl: deleteArtifactFetch })).find(t => t.name === 'github_delete_artifact')!
+    expect(await deleteArtifactTool.execute({ owner: 'a', repo: 'b', artifactId: 10 }, exec())).toEqual({ ok: true, artifactId: 10 })
+
+    const deleteEnvFetch = vi.fn(async () => new Response(null, { status: 204 }))
+    const deleteEnvTool = createTools(new GithubClient({ token: 'ghp_test', fetchImpl: deleteEnvFetch })).find(t => t.name === 'github_delete_environment')!
+    expect(await deleteEnvTool.execute({ owner: 'a', repo: 'b', name: 'prod' }, exec())).toEqual({ ok: true, name: 'prod' })
+  })
+
+  it('presentCall for stage 16 tools', () => {
+    const defs = Object.fromEntries(createTools(new GithubClient()).map(t => [t.name, t])) as any
+    expect(defs['github_list_repo_artifacts'].presentCall({ owner: 'a', repo: 'b' })).toMatchObject({ kind: 'search' })
+    expect(defs['github_list_run_artifacts'].presentCall({ owner: 'a', repo: 'b', runId: 9 })).toMatchObject({ kind: 'search' })
+    expect(defs['github_get_artifact'].presentCall({ owner: 'a', repo: 'b', artifactId: 10 })).toMatchObject({ kind: 'read' })
+    expect(defs['github_delete_artifact'].presentCall({ owner: 'a', repo: 'b', artifactId: 10 })).toMatchObject({ kind: 'edit' })
+    expect(defs['github_list_environments'].presentCall({ owner: 'a', repo: 'b' })).toMatchObject({ kind: 'search' })
+    expect(defs['github_get_environment'].presentCall({ owner: 'a', repo: 'b', environmentName: 'prod' })).toMatchObject({ kind: 'read' })
+    expect(defs['github_update_environment'].presentCall({ owner: 'a', repo: 'b', name: 'prod' })).toMatchObject({ kind: 'edit' })
+    expect(defs['github_delete_environment'].presentCall({ owner: 'a', repo: 'b', name: 'prod' })).toMatchObject({ kind: 'edit' })
   })
 })
