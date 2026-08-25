@@ -80,6 +80,7 @@ npm install /path/to/dsh-tool-github
 | `github_get_workflow_run_logs` | 下载并解码 workflow run 日志（上限 20 万字符） | 否* |
 | `github_rerun_workflow_run` | 重新运行 workflow run | 是 |
 | `github_cancel_workflow_run` | 取消进行中的 workflow run | 是 |
+| `github_dispatch_workflow` | 触发 workflow_dispatch（ref + 字符串 inputs） | 是 |
 | `github_create_branch` | 创建分支（从指定 ref） | 是 |
 | `github_write_file` | 创建/更新文件（自动提交） | 是 |
 | `github_get_readme` | 读取仓库 README（markdown） | 否 |

@@ -1979,5 +1979,61 @@ export function createTools(client: GithubClient) {
         return client.createPrDraft(args.owner, args.repo, { title: args.title, head: args.head, base: args.base, body: args.body }, exec.signal)
       },
     }),
+
+    defineTool({
+      name: 'github_dispatch_workflow',
+      description: 'Dispatch a GitHub Actions workflow with optional string inputs. WRITE operation: requires a token and starts a new workflow run.',
+      parameters: {
+        owner: { type: 'string', required: true, description: 'Repository owner' },
+        repo: { type: 'string', required: true, description: 'Repository name' },
+        workflowId: { type: 'integer', required: true, description: 'Workflow id (the action must support workflow_dispatch)' },
+        ref: { type: 'string', required: true, description: 'Git ref to run the workflow on, e.g. main' },
+        inputs: {
+          type: 'array',
+          items: {
+            type: 'object',
+            additionalProperties: false,
+            properties: {
+              name: { type: 'string', required: true, description: 'Input name' },
+              value: { type: 'string', required: true, description: 'Input value' },
+            },
+          },
+          description: 'Optional workflow_dispatch inputs (name/value pairs, string values only)',
+        },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            ok: { type: 'boolean', description: 'Whether the dispatch was accepted' },
+            workflowId: { type: 'integer', description: 'Workflow id' },
+            reason: { type: 'string', description: 'Explanation when not dispatched' },
+          },
+        },
+        render: (_args, value) => {
+          if (value.ok) return [{ type: 'text', text: `Workflow #${value.workflowId} dispatched on ${_args.ref}` }]
+          return [{ type: 'text', text: `Could not dispatch workflow #${value.workflowId}: ${value.reason}` }]
+        },
+      },
+      presentCall(args): ToolCallView {
+        return { card: 'generic', title: `Dispatch workflow #${args.workflowId} on ${args.ref}`, kind: 'edit' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { ok?: boolean; workflowId?: number; reason?: string }
+        if (v.ok) return { card: 'generic', title: `Workflow #${v.workflowId} dispatched` }
+        return { card: 'generic', title: 'Dispatch failed', content: [{ type: 'text', text: v.reason ?? 'Unknown' }] }
+      },
+      async execute(args, exec) {
+        if (!client.hasToken()) {
+          return { ok: false, workflowId: args.workflowId as number, reason: 'Dispatching a workflow requires a GitHub token. Configure the plugin with a token.' }
+        }
+        const inputs = (args.inputs as Array<{ name: string; value: string }> | undefined)?.reduce<Record<string, string>>((acc, item) => {
+          acc[item.name] = item.value
+          return acc
+        }, {})
+        return client.dispatchWorkflow(args.owner as string, args.repo as string, args.workflowId as number, { ref: args.ref as string, inputs }, exec.signal)
+      },
+    }),
   ]
 }

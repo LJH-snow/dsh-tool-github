@@ -22,6 +22,7 @@ describe('tool definitions', () => {
       'github_create_issue',
       'github_create_pr_draft',
       'github_create_release',
+      'github_dispatch_workflow',
       'github_get_file',
       'github_get_issue',
       'github_get_pull_request',
@@ -154,6 +155,7 @@ describe('extended tools (stage 5)', () => {
       'github_create_issue',
       'github_create_pr_draft',
       'github_create_release',
+      'github_dispatch_workflow',
       'github_get_file',
       'github_get_issue',
       'github_get_pull_request',
@@ -445,5 +447,24 @@ describe('stage 11 tools', () => {
     expect(defs['github_list_pull_request_reviews'].presentCall({ owner: 'a', repo: 'b', prNumber: 1 })).toMatchObject({ kind: 'search' })
     expect(defs['github_request_pr_reviewers'].presentCall({ owner: 'a', repo: 'b', prNumber: 1, reviewers: ['alice'] })).toMatchObject({ kind: 'edit' })
     expect(defs['github_submit_pr_review'].presentCall({ owner: 'a', repo: 'b', prNumber: 1, body: 'LGTM', event: 'APPROVE' })).toMatchObject({ kind: 'edit' })
+  })
+})
+
+describe('stage 12 tools', () => {
+  it('github_dispatch_workflow requires a token and dispatches with one', async () => {
+    const noToken = createTools(new GithubClient({ fetchImpl: vi.fn() })).find(t => t.name === 'github_dispatch_workflow')!
+    expect(await noToken.execute({ owner: 'a', repo: 'b', workflowId: 1, ref: 'main' }, exec())).toMatchObject({ ok: false, reason: expect.stringContaining('token') })
+
+    const fetchImpl = vi.fn(async () => new Response(null, { status: 204 }))
+    const tool = createTools(new GithubClient({ token: 'ghp_test', fetchImpl })).find(t => t.name === 'github_dispatch_workflow')!
+    expect(await tool.execute({ owner: 'a', repo: 'b', workflowId: 1, ref: 'main', inputs: [{ name: 'version', value: '1.2.3' }] }, exec())).toEqual({ ok: true, workflowId: 1 })
+    const [url, init] = fetchImpl.mock.calls[0] as [string, RequestInit]
+    expect(url).toContain('/actions/workflows/1/dispatches')
+    expect(JSON.parse(String(init.body))).toEqual({ ref: 'main', inputs: { version: '1.2.3' } })
+  })
+
+  it('presentCall for github_dispatch_workflow', () => {
+    const defs = Object.fromEntries(createTools(new GithubClient()).map(t => [t.name, t])) as any
+    expect(defs['github_dispatch_workflow'].presentCall({ owner: 'a', repo: 'b', workflowId: 1, ref: 'main' })).toMatchObject({ kind: 'edit' })
   })
 })

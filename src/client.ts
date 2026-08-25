@@ -252,6 +252,12 @@ export interface WorkflowActionResult {
   reason?: string
 }
 
+export interface WorkflowDispatchResult {
+  ok: boolean
+  workflowId?: number
+  reason?: string
+}
+
 export interface BranchCreateResult {
   ok: boolean
   name?: string
@@ -1088,6 +1094,25 @@ export class GithubClient {
     } catch (error) {
       if (error instanceof GithubError && (error.status === 404 || error.status === 409)) {
         return { ok: false, runId, reason: 'Cannot cancel this workflow run (not found or the run is already complete).' }
+      }
+      throw error
+    }
+  }
+
+  async dispatchWorkflow(owner: string, repo: string, workflowId: number, input: { ref: string; inputs?: Record<string, string> }, signal?: AbortSignal): Promise<WorkflowDispatchResult> {
+    try {
+      const body: Record<string, unknown> = { ref: input.ref }
+      if (input.inputs && Object.keys(input.inputs).length > 0) {
+        body.inputs = input.inputs
+      }
+      await this.request<unknown>(
+        `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/actions/workflows/${workflowId}/dispatches`,
+        { method: 'POST', body, signal },
+      )
+      return { ok: true, workflowId }
+    } catch (error) {
+      if (error instanceof GithubError && (error.status === 404 || error.status === 422)) {
+        return { ok: false, workflowId, reason: 'Cannot dispatch this workflow (not found, or the ref/inputs are invalid).' }
       }
       throw error
     }

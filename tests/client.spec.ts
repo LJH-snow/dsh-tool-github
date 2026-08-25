@@ -602,3 +602,27 @@ describe('GithubClient stage 11', () => {
     expect((await failed.submitPrReview('a', 'b', 5, { body: 'x', event: 'COMMENT' })).ok).toBe(false)
   })
 })
+
+describe('GithubClient stage 12', () => {
+  it('dispatchWorkflow posts to the workflow dispatch endpoint', async () => {
+    const fetchImpl = vi.fn(async () => new Response(null, { status: 204 }))
+    const client = new GithubClient({ token: 'ghp_test', fetchImpl })
+    const result = await client.dispatchWorkflow('a', 'b', 7, { ref: 'main', inputs: { version: '1.2.3' } })
+    const [url, init] = fetchImpl.mock.calls[0] as [string, RequestInit]
+    expect(url).toContain('/repos/a/b/actions/workflows/7/dispatches')
+    expect(init.method).toBe('POST')
+    expect(JSON.parse(String(init.body))).toEqual({ ref: 'main', inputs: { version: '1.2.3' } })
+    expect(result).toEqual({ ok: true, workflowId: 7 })
+  })
+
+  it('dispatchWorkflow omits empty inputs and maps 422', async () => {
+    const fetchImpl = vi.fn(async () => new Response(null, { status: 204 }))
+    const client = new GithubClient({ token: 'ghp_test', fetchImpl })
+    await client.dispatchWorkflow('a', 'b', 7, { ref: 'main', inputs: {} })
+    const [, init] = fetchImpl.mock.calls[0] as [string, RequestInit]
+    expect(JSON.parse(String(init.body))).toEqual({ ref: 'main' })
+
+    const failed = new GithubClient({ token: 'ghp_test', fetchImpl: vi.fn(async () => jsonResponse(422, {})) })
+    expect((await failed.dispatchWorkflow('a', 'b', 7, { ref: 'nope' })).ok).toBe(false)
+  })
+})

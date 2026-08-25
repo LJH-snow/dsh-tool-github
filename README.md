@@ -78,6 +78,7 @@ Full example: [examples/cordis.yml](examples/cordis.yml).
 | `github_get_workflow_run_logs` | Download and decode workflow run logs (200k char cap) | no* |
 | `github_rerun_workflow_run` | Rerun a workflow run | yes |
 | `github_cancel_workflow_run` | Cancel an in-progress workflow run | yes |
+| `github_dispatch_workflow` | Dispatch a workflow_dispatch run with a ref and string inputs | yes |
 | `github_create_branch` | Create a branch from a ref | yes |
 | `github_write_file` | Create/update a file (creates a commit) | yes |
 | `github_get_readme` | Read the repository README (markdown) | no |
