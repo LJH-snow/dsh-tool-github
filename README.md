@@ -84,6 +84,13 @@ Full example: [examples/cordis.yml](examples/cordis.yml).
 | `github_list_team_repos` | List repositories accessible to an organization team | yes |
 | `github_update_team_membership` | Add a team member or change their role | yes |
 | `github_remove_team_membership` | Remove a user from an organization team | yes |
+| `github_list_collaborators` | List repository collaborators and effective permissions | yes |
+| `github_get_collaborator_permission` | Get one collaborator permission and role source | yes |
+| `github_add_collaborator` | Invite or add a repository collaborator with a permission level | yes |
+| `github_update_collaborator_permission` | Update an existing collaborator's permission | yes |
+| `github_remove_collaborator` | Remove a direct collaborator from a repository | yes |
+| `github_add_team_repo` | Grant an organization team access to a repository | yes |
+| `github_remove_team_repo` | Remove an organization team's repository access | yes |
 | `github_list_repo_webhooks` | List repository webhooks with events, payload config, and delivery endpoints | yes |
 | `github_get_repo_webhook` | Get one repository webhook configuration | yes |
 | `github_create_repo_webhook` | Create a repository webhook (events, secret, content type, active state) | yes |

@@ -16,7 +16,9 @@ const tools = () => Object.fromEntries(createTools(new GithubClient({ fetchImpl:
 describe('tool definitions', () => {
   it('registers the planned tools', () => {
     expect(Object.keys(tools()).sort()).toEqual([
+      'github_add_collaborator',
       'github_add_issue_assignees',
+      'github_add_team_repo',
       'github_cancel_workflow_run',
       'github_comment_issue',
       'github_create_branch',
@@ -36,6 +38,7 @@ describe('tool definitions', () => {
       'github_dispatch_workflow',
       'github_get_artifact',
       'github_get_branch_protection',
+      'github_get_collaborator_permission',
       'github_get_environment',
       'github_get_file',
       'github_get_issue',
@@ -51,6 +54,7 @@ describe('tool definitions', () => {
       'github_get_workflow_run',
       'github_get_workflow_run_logs',
       'github_list_branches',
+      'github_list_collaborators',
       'github_list_commits',
       'github_list_environments',
       'github_list_gists',
@@ -78,7 +82,9 @@ describe('tool definitions', () => {
       'github_list_workflows',
       'github_merge_pr',
       'github_ping_repo_webhook',
+      'github_remove_collaborator',
       'github_remove_team_membership',
+      'github_remove_team_repo',
       'github_reply_pr_comment',
       'github_request_pr_reviewers',
       'github_rerun_workflow_run',
@@ -93,6 +99,7 @@ describe('tool definitions', () => {
       'github_star_repo',
       'github_submit_pr_review',
       'github_unstar_repo',
+      'github_update_collaborator_permission',
       'github_update_environment',
       'github_update_issue',
       'github_update_release_asset',
@@ -194,7 +201,9 @@ describe('extended tools (stage 5)', () => {
   it('registers the full tool set', () => {
     const names = Object.keys(Object.fromEntries(createTools(new GithubClient()).map(t => [t.name, t]))).sort()
     expect(names).toEqual([
+      'github_add_collaborator',
       'github_add_issue_assignees',
+      'github_add_team_repo',
       'github_cancel_workflow_run',
       'github_comment_issue',
       'github_create_branch',
@@ -214,6 +223,7 @@ describe('extended tools (stage 5)', () => {
       'github_dispatch_workflow',
       'github_get_artifact',
       'github_get_branch_protection',
+      'github_get_collaborator_permission',
       'github_get_environment',
       'github_get_file',
       'github_get_issue',
@@ -229,6 +239,7 @@ describe('extended tools (stage 5)', () => {
       'github_get_workflow_run',
       'github_get_workflow_run_logs',
       'github_list_branches',
+      'github_list_collaborators',
       'github_list_commits',
       'github_list_environments',
       'github_list_gists',
@@ -256,7 +267,9 @@ describe('extended tools (stage 5)', () => {
       'github_list_workflows',
       'github_merge_pr',
       'github_ping_repo_webhook',
+      'github_remove_collaborator',
       'github_remove_team_membership',
+      'github_remove_team_repo',
       'github_reply_pr_comment',
       'github_request_pr_reviewers',
       'github_rerun_workflow_run',
@@ -271,6 +284,7 @@ describe('extended tools (stage 5)', () => {
       'github_star_repo',
       'github_submit_pr_review',
       'github_unstar_repo',
+      'github_update_collaborator_permission',
       'github_update_environment',
       'github_update_issue',
       'github_update_release_asset',
@@ -1066,5 +1080,140 @@ describe('stage 18 tools', () => {
     expect(defs['github_list_repo_webhooks'].presentResult({ owner: 'a', repo: 'b' }, { found: false })).toMatchObject({ title: 'Webhooks not accessible' })
     expect(defs['github_get_release_asset'].presentResult({ owner: 'a', repo: 'b', assetId: 99 }, { found: false })).toMatchObject({ title: 'Release asset not found' })
     expect(defs['github_update_repo_webhook'].presentResult({ owner: 'a', repo: 'b', hookId: 12 }, { ok: false, reason: 'nope' })).toMatchObject({ title: 'Update webhook failed' })
+  })
+})
+
+describe('stage 19 tools', () => {
+  it('collaborator and team repo tools require a token', async () => {
+    const noToken = Object.fromEntries(createTools(new GithubClient({ fetchImpl: vi.fn() })).map(t => [t.name, t]))
+    const cases: Array<{ name: string; args: Record<string, unknown> }> = [
+      { name: 'github_list_collaborators', args: { owner: 'a', repo: 'b' } },
+      { name: 'github_get_collaborator_permission', args: { owner: 'a', repo: 'b', username: 'alice' } },
+      { name: 'github_add_collaborator', args: { owner: 'a', repo: 'b', username: 'alice', permission: 'push' } },
+      { name: 'github_update_collaborator_permission', args: { owner: 'a', repo: 'b', username: 'alice', permission: 'admin' } },
+      { name: 'github_remove_collaborator', args: { owner: 'a', repo: 'b', username: 'alice' } },
+      { name: 'github_add_team_repo', args: { org: 'acme', teamSlug: 'core', owner: 'a', repo: 'b', permission: 'push' } },
+      { name: 'github_remove_team_repo', args: { org: 'acme', teamSlug: 'core', owner: 'a', repo: 'b' } },
+    ]
+    for (const { name, args } of cases) {
+      const result = await noToken[name].execute(args, exec()) as Record<string, unknown>
+      expect(result.reason).toContain('token')
+      if (name.startsWith('github_list') || name.startsWith('github_get')) {
+        expect(result.found).toBe(false)
+      } else {
+        expect(result.ok).toBe(false)
+      }
+    }
+  })
+
+  it('collaborator tools pass through with a token', async () => {
+    const rawCollaborator = {
+      login: 'alice',
+      id: 101,
+      avatar_url: 'https://avatar.example/alice.png',
+      permissions: { pull: true, triage: false, push: true, maintain: false, admin: false },
+      role_name: 'write',
+      url: 'https://api.github.com/users/alice',
+      html_url: 'https://github.com/alice',
+    }
+
+    const listFetch = vi.fn(async () => jsonResponse(200, [rawCollaborator]))
+    const listTool = createTools(new GithubClient({ token: 'ghp_test', fetchImpl: listFetch })).find(t => t.name === 'github_list_collaborators')!
+    expect(await listTool.execute({ owner: 'a', repo: 'b', permission: 'push', affiliation: 'direct', limit: 10 }, exec())).toMatchObject({
+      found: true,
+      items: [{ login: 'alice', roleName: 'write' }],
+    })
+    const listUrl = String(listFetch.mock.calls[0][0])
+    expect(listUrl).toContain('/repos/a/b/collaborators?')
+    expect(listUrl).toContain('permission=push')
+    expect(listUrl).toContain('affiliation=direct')
+    expect(listUrl).toContain('per_page=10')
+
+    const getFetch = vi.fn(async () => jsonResponse(200, {
+      permission: 'admin',
+      role_name: 'admin',
+      source: 'organization',
+      user: { login: 'alice', html_url: 'https://github.com/alice' },
+    }))
+    const getTool = createTools(new GithubClient({ token: 'ghp_test', fetchImpl: getFetch })).find(t => t.name === 'github_get_collaborator_permission')!
+    expect(await getTool.execute({ owner: 'a', repo: 'b', username: 'alice' }, exec())).toMatchObject({
+      found: true,
+      login: 'alice',
+      permission: 'admin',
+      source: 'organization',
+    })
+
+    const addFetch = vi.fn(async () => jsonResponse(201, rawCollaborator))
+    const addTool = createTools(new GithubClient({ token: 'ghp_test', fetchImpl: addFetch })).find(t => t.name === 'github_add_collaborator')!
+    expect(await addTool.execute({ owner: 'a', repo: 'b', username: 'alice', permission: 'push' }, exec())).toEqual({
+      ok: true,
+      login: 'alice',
+      permission: 'push',
+      created: true,
+    })
+    const [, addInit] = addFetch.mock.calls[0] as [string, RequestInit]
+    expect(addInit.method).toBe('PUT')
+    expect(JSON.parse(String(addInit.body))).toEqual({ permission: 'push' })
+
+    const updateFetch = vi.fn(async () => jsonResponse(200, rawCollaborator))
+    const updateTool = createTools(new GithubClient({ token: 'ghp_test', fetchImpl: updateFetch })).find(t => t.name === 'github_update_collaborator_permission')!
+    expect(await updateTool.execute({ owner: 'a', repo: 'b', username: 'alice', permission: 'admin' }, exec())).toEqual({
+      ok: true,
+      login: 'alice',
+      permission: 'admin',
+    })
+    const [, updateInit] = updateFetch.mock.calls[0] as [string, RequestInit]
+    expect(JSON.parse(String(updateInit.body))).toEqual({ permission: 'admin' })
+
+    const removeFetch = vi.fn(async () => new Response(null, { status: 204 }))
+    const removeTool = createTools(new GithubClient({ token: 'ghp_test', fetchImpl: removeFetch })).find(t => t.name === 'github_remove_collaborator')!
+    expect(await removeTool.execute({ owner: 'a', repo: 'b', username: 'alice' }, exec())).toEqual({ ok: true, login: 'alice' })
+  })
+
+  it('team repo tools pass through with a token', async () => {
+    const addFetch = vi.fn(async () => new Response(null, { status: 204 }))
+    const addTool = createTools(new GithubClient({ token: 'ghp_test', fetchImpl: addFetch })).find(t => t.name === 'github_add_team_repo')!
+    expect(await addTool.execute({ org: 'acme', teamSlug: 'core', owner: 'a', repo: 'b', permission: 'admin' }, exec())).toEqual({
+      ok: true,
+      org: 'acme',
+      teamSlug: 'core',
+      repo: 'a/b',
+      permission: 'admin',
+    })
+    const [addUrl, addInit] = addFetch.mock.calls[0] as [string, RequestInit]
+    expect(addUrl).toContain('/orgs/acme/teams/core/repos/a/b')
+    expect(addInit.method).toBe('PUT')
+    expect(JSON.parse(String(addInit.body))).toEqual({ permission: 'admin' })
+
+    const removeFetch = vi.fn(async () => new Response(null, { status: 204 }))
+    const removeTool = createTools(new GithubClient({ token: 'ghp_test', fetchImpl: removeFetch })).find(t => t.name === 'github_remove_team_repo')!
+    expect(await removeTool.execute({ org: 'acme', teamSlug: 'core', owner: 'a', repo: 'b' }, exec())).toEqual({
+      ok: true,
+      org: 'acme',
+      teamSlug: 'core',
+      repo: 'a/b',
+    })
+  })
+
+  it('collaborator and team repo reads map 404 and writes map 404/422 to business failures', async () => {
+    const missing = Object.fromEntries(createTools(new GithubClient({ token: 'ghp_test', fetchImpl: vi.fn(async () => jsonResponse(404, {})) })).map(t => [t.name, t]))
+    expect(await missing['github_list_collaborators'].execute({ owner: 'a', repo: 'b' }, exec())).toEqual({ found: false, items: [] })
+    expect(await missing['github_get_collaborator_permission'].execute({ owner: 'a', repo: 'b', username: 'nobody' }, exec())).toEqual({ found: false })
+    expect(await missing['github_add_collaborator'].execute({ owner: 'a', repo: 'b', username: 'nobody' }, exec())).toMatchObject({ ok: false })
+    expect(await missing['github_update_collaborator_permission'].execute({ owner: 'a', repo: 'b', username: 'nobody', permission: 'push' }, exec())).toMatchObject({ ok: false })
+    expect(await missing['github_remove_collaborator'].execute({ owner: 'a', repo: 'b', username: 'nobody' }, exec())).toMatchObject({ ok: false })
+    expect(await missing['github_add_team_repo'].execute({ org: 'acme', teamSlug: 'core', owner: 'a', repo: 'missing' }, exec())).toMatchObject({ ok: false })
+    expect(await missing['github_remove_team_repo'].execute({ org: 'acme', teamSlug: 'core', owner: 'a', repo: 'missing' }, exec())).toMatchObject({ ok: false })
+  })
+
+  it('presentCall for stage 19 tools', () => {
+    const defs = Object.fromEntries(createTools(new GithubClient()).map(t => [t.name, t])) as any
+    expect(defs['github_list_collaborators'].presentCall({ owner: 'a', repo: 'b' })).toMatchObject({ kind: 'search' })
+    expect(defs['github_get_collaborator_permission'].presentCall({ owner: 'a', repo: 'b', username: 'alice' })).toMatchObject({ kind: 'read' })
+    expect(defs['github_add_collaborator'].presentCall({ owner: 'a', repo: 'b', username: 'alice' })).toMatchObject({ kind: 'edit' })
+    expect(defs['github_update_collaborator_permission'].presentCall({ owner: 'a', repo: 'b', username: 'alice', permission: 'admin' })).toMatchObject({ kind: 'edit' })
+    expect(defs['github_remove_collaborator'].presentCall({ owner: 'a', repo: 'b', username: 'alice' })).toMatchObject({ kind: 'edit' })
+    expect(defs['github_add_team_repo'].presentCall({ org: 'acme', teamSlug: 'core', owner: 'a', repo: 'b' })).toMatchObject({ kind: 'edit' })
+    expect(defs['github_remove_team_repo'].presentCall({ org: 'acme', teamSlug: 'core', owner: 'a', repo: 'b' })).toMatchObject({ kind: 'edit' })
   })
 })

@@ -1431,3 +1431,109 @@ describe('GithubClient stage 18', () => {
     expect((await failed.deleteReleaseAsset('a', 'b', 99)).ok).toBe(false)
   })
 })
+
+describe('GithubClient stage 19', () => {
+  it('collaborator reads map permission data and pass filters', async () => {
+    const rawCollaborators = [{
+      login: 'alice',
+      id: 101,
+      avatar_url: 'https://avatar.example/alice.png',
+      permissions: { pull: true, triage: false, push: true, maintain: false, admin: false },
+      role_name: 'write',
+      url: 'https://api.github.com/users/alice',
+      html_url: 'https://github.com/alice',
+    }]
+    const listFetch = vi.fn(async () => jsonResponse(200, rawCollaborators))
+    const listClient = new GithubClient({ token: 'ghp_test', fetchImpl: listFetch })
+    expect(await listClient.listCollaborators('a', 'b', {
+      affiliation: 'direct',
+      permission: 'push',
+      perPage: 10,
+    })).toEqual([{
+      login: 'alice',
+      id: 101,
+      avatarUrl: 'https://avatar.example/alice.png',
+      permissions: { pull: true, triage: false, push: true, maintain: false, admin: false },
+      roleName: 'write',
+      url: 'https://api.github.com/users/alice',
+      htmlUrl: 'https://github.com/alice',
+    }])
+    const listUrl = String(listFetch.mock.calls[0][0])
+    expect(listUrl).toContain('/repos/a/b/collaborators?')
+    expect(listUrl).toContain('affiliation=direct')
+    expect(listUrl).toContain('permission=push')
+    expect(listUrl).toContain('per_page=10')
+
+    const permissionFetch = vi.fn(async () => jsonResponse(200, {
+      permission: 'admin',
+      role_name: 'admin',
+      source: 'organization',
+      user: { login: 'alice', html_url: 'https://github.com/alice' },
+    }))
+    const permissionClient = new GithubClient({ token: 'ghp_test', fetchImpl: permissionFetch })
+    expect(await permissionClient.getCollaboratorPermission('a', 'b', 'alice')).toEqual({
+      permission: 'admin',
+      login: 'alice',
+      roleName: 'admin',
+      source: 'organization',
+      userUrl: 'https://github.com/alice',
+    })
+    expect(String(permissionFetch.mock.calls[0][0])).toContain('/repos/a/b/collaborators/alice/permission')
+  })
+
+  it('collaborator and team repo writes send PUT/DELETE and map failures', async () => {
+    const collaboratorFetch = vi.fn(async () => jsonResponse(201, {
+      login: 'alice',
+      id: 101,
+      avatar_url: 'https://avatar',
+      url: 'https://api.github.com/users/alice',
+      html_url: 'https://github.com/alice',
+    }))
+    const collaboratorClient = new GithubClient({ token: 'ghp_test', fetchImpl: collaboratorFetch })
+    expect(await collaboratorClient.setCollaboratorPermission('a', 'b', 'alice', { permission: 'maintain' })).toEqual({
+      ok: true,
+      login: 'alice',
+      permission: 'maintain',
+      created: true,
+    })
+    const [collaboratorUrl, collaboratorInit] = collaboratorFetch.mock.calls[0] as [string, RequestInit]
+    expect(collaboratorUrl).toContain('/repos/a/b/collaborators/alice')
+    expect(collaboratorInit.method).toBe('PUT')
+    expect(JSON.parse(String(collaboratorInit.body))).toEqual({ permission: 'maintain' })
+
+    const removeFetch = vi.fn(async () => new Response(null, { status: 204 }))
+    const removeClient = new GithubClient({ token: 'ghp_test', fetchImpl: removeFetch })
+    expect(await removeClient.removeCollaborator('a', 'b', 'alice')).toEqual({ ok: true, login: 'alice' })
+    expect(removeFetch.mock.calls[0][1]).toMatchObject({ method: 'DELETE' })
+
+    const teamRepoFetch = vi.fn(async () => new Response(null, { status: 204 }))
+    const teamRepoClient = new GithubClient({ token: 'ghp_test', fetchImpl: teamRepoFetch })
+    expect(await teamRepoClient.addTeamRepo('acme', 'core', 'a', 'b', { permission: 'admin' })).toEqual({
+      ok: true,
+      org: 'acme',
+      teamSlug: 'core',
+      repo: 'a/b',
+      permission: 'admin',
+    })
+    const [teamRepoUrl, teamRepoInit] = teamRepoFetch.mock.calls[0] as [string, RequestInit]
+    expect(teamRepoUrl).toContain('/orgs/acme/teams/core/repos/a/b')
+    expect(teamRepoInit.method).toBe('PUT')
+    expect(JSON.parse(String(teamRepoInit.body))).toEqual({ permission: 'admin' })
+
+    const removeTeamRepoFetch = vi.fn(async () => new Response(null, { status: 204 }))
+    const removeTeamRepoClient = new GithubClient({ token: 'ghp_test', fetchImpl: removeTeamRepoFetch })
+    expect(await removeTeamRepoClient.removeTeamRepo('acme', 'core', 'a', 'b')).toEqual({
+      ok: true,
+      org: 'acme',
+      teamSlug: 'core',
+      repo: 'a/b',
+    })
+    expect(removeTeamRepoFetch.mock.calls[0][1]).toMatchObject({ method: 'DELETE' })
+
+    const failed = new GithubClient({ token: 'ghp_test', fetchImpl: vi.fn(async () => jsonResponse(404, {})) })
+    expect((await failed.setCollaboratorPermission('a', 'b', 'nobody')).ok).toBe(false)
+    expect((await failed.removeCollaborator('a', 'b', 'nobody')).ok).toBe(false)
+    expect((await failed.addTeamRepo('acme', 'core', 'a', 'missing')).ok).toBe(false)
+    expect((await failed.removeTeamRepo('acme', 'core', 'a', 'missing')).ok).toBe(false)
+  })
+})

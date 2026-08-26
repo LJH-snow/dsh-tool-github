@@ -505,6 +505,47 @@ export interface TeamMembershipResult {
   reason?: string
 }
 
+export interface CollaboratorItem {
+  login: string
+  id: number
+  avatarUrl: string
+  permissions?: {
+    pull: boolean
+    triage: boolean
+    push: boolean
+    maintain: boolean
+    admin: boolean
+  }
+  roleName?: string
+  url: string
+  htmlUrl: string
+}
+
+export interface CollaboratorPermissionItem {
+  permission: string
+  login: string
+  roleName?: string
+  source?: string
+  userUrl: string
+}
+
+export interface CollaboratorWriteResult {
+  ok: boolean
+  login?: string
+  permission?: string
+  created?: boolean
+  reason?: string
+}
+
+export interface TeamRepoWriteResult {
+  ok: boolean
+  org?: string
+  teamSlug?: string
+  repo?: string
+  permission?: string
+  reason?: string
+}
+
 export interface WebhookItem {
   id: number
   name: string
@@ -803,6 +844,60 @@ function mapTeam(raw: RawTeam): TeamItem {
     htmlUrl: raw.html_url,
     membersCount: raw.members_count ?? null,
     reposCount: raw.repos_count ?? null,
+  }
+}
+
+interface RawCollaborator {
+  login: string
+  id: number
+  avatar_url: string
+  permissions?: {
+    pull?: boolean
+    triage?: boolean
+    push?: boolean
+    maintain?: boolean
+    admin?: boolean
+  }
+  role_name?: string | null
+  url: string
+  html_url: string
+}
+
+interface RawCollaboratorPermission {
+  permission: string
+  role_name?: string | null
+  source?: string
+  user: {
+    login: string
+    html_url: string
+  }
+}
+
+function mapCollaborator(raw: RawCollaborator): CollaboratorItem {
+  return {
+    login: raw.login,
+    id: raw.id,
+    avatarUrl: raw.avatar_url,
+    permissions: raw.permissions ? {
+      pull: raw.permissions.pull ?? false,
+      triage: raw.permissions.triage ?? false,
+      push: raw.permissions.push ?? false,
+      maintain: raw.permissions.maintain ?? false,
+      admin: raw.permissions.admin ?? false,
+    } : undefined,
+    roleName: raw.role_name ?? undefined,
+    url: raw.url,
+    htmlUrl: raw.html_url,
+  }
+}
+
+function mapCollaboratorPermission(raw: RawCollaboratorPermission): CollaboratorPermissionItem {
+  return {
+    permission: raw.permission,
+    login: raw.user.login,
+    roleName: raw.role_name ?? undefined,
+    source: raw.source,
+    userUrl: raw.user.html_url,
   }
 }
 
@@ -1627,6 +1722,102 @@ export class GithubClient {
     } catch (error) {
       if (error instanceof GithubError && (error.status === 404 || error.status === 422)) {
         return { ok: false, username, reason: 'Could not remove team membership (team or user not found).' }
+      }
+      throw error
+    }
+  }
+
+  async listCollaborators(owner: string, repo: string, options: {
+    affiliation?: 'all' | 'direct' | 'outside'
+    permission?: 'pull' | 'triage' | 'push' | 'maintain' | 'admin'
+    perPage?: number
+    signal?: AbortSignal
+  } = {}): Promise<CollaboratorItem[]> {
+    const params = new URLSearchParams({
+      per_page: String(Math.max(1, Math.min(options.perPage ?? 30, 100))),
+    })
+    if (options.affiliation) params.set('affiliation', options.affiliation)
+    if (options.permission) params.set('permission', options.permission)
+    const data = await this.request<RawCollaborator[]>(
+      `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/collaborators?${params}`,
+      { signal: options.signal },
+    )
+    return data.map(mapCollaborator)
+  }
+
+  async getCollaboratorPermission(owner: string, repo: string, username: string, signal?: AbortSignal): Promise<CollaboratorPermissionItem> {
+    const data = await this.request<RawCollaboratorPermission>(
+      `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/collaborators/${encodeURIComponent(username)}/permission`,
+      { signal },
+    )
+    return mapCollaboratorPermission(data)
+  }
+
+  async setCollaboratorPermission(
+    owner: string,
+    repo: string,
+    username: string,
+    input: { permission?: 'pull' | 'triage' | 'push' | 'maintain' | 'admin'; signal?: AbortSignal } = {},
+  ): Promise<CollaboratorWriteResult> {
+    try {
+      const data = await this.request<RawCollaborator | undefined>(
+        `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/collaborators/${encodeURIComponent(username)}`,
+        { method: 'PUT', body: { permission: input.permission ?? 'pull' }, signal: input.signal },
+      )
+      return {
+        ok: true,
+        login: username,
+        permission: input.permission ?? 'pull',
+        created: data !== undefined,
+      }
+    } catch (error) {
+      if (error instanceof GithubError && (error.status === 404 || error.status === 422)) {
+        return { ok: false, login: username, reason: 'Could not add or update the collaborator (repository or user not found, or permission invalid).' }
+      }
+      throw error
+    }
+  }
+
+  async removeCollaborator(owner: string, repo: string, username: string, signal?: AbortSignal): Promise<CollaboratorWriteResult> {
+    try {
+      await this.request<unknown>(
+        `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/collaborators/${encodeURIComponent(username)}`,
+        { method: 'DELETE', signal },
+      )
+      return { ok: true, login: username }
+    } catch (error) {
+      if (error instanceof GithubError && (error.status === 404 || error.status === 422)) {
+        return { ok: false, login: username, reason: 'Could not remove the collaborator (repository or user not found).' }
+      }
+      throw error
+    }
+  }
+
+  async addTeamRepo(org: string, teamSlug: string, owner: string, repo: string, input: { permission?: 'pull' | 'push' | 'admin'; signal?: AbortSignal } = {}): Promise<TeamRepoWriteResult> {
+    try {
+      await this.request<unknown>(
+        `/orgs/${encodeURIComponent(org)}/teams/${encodeURIComponent(teamSlug)}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`,
+        { method: 'PUT', body: { permission: input.permission ?? 'push' }, signal: input.signal },
+      )
+      return { ok: true, org, teamSlug, repo: `${owner}/${repo}`, permission: input.permission ?? 'push' }
+    } catch (error) {
+      if (error instanceof GithubError && (error.status === 404 || error.status === 422)) {
+        return { ok: false, org, teamSlug, repo: `${owner}/${repo}`, reason: 'Could not add the repository to the team (team, repo, or permission invalid).' }
+      }
+      throw error
+    }
+  }
+
+  async removeTeamRepo(org: string, teamSlug: string, owner: string, repo: string, signal?: AbortSignal): Promise<TeamRepoWriteResult> {
+    try {
+      await this.request<unknown>(
+        `/orgs/${encodeURIComponent(org)}/teams/${encodeURIComponent(teamSlug)}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`,
+        { method: 'DELETE', signal },
+      )
+      return { ok: true, org, teamSlug, repo: `${owner}/${repo}` }
+    } catch (error) {
+      if (error instanceof GithubError && (error.status === 404 || error.status === 422)) {
+        return { ok: false, org, teamSlug, repo: `${owner}/${repo}`, reason: 'Could not remove the repository from the team (team or repo not found).' }
       }
       throw error
     }

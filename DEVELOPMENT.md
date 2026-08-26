@@ -330,7 +330,31 @@ v0.12 方向：补齐仓库事件接入与 Release 产物管理，让 Agent 可�
 - create/update 支持 `contentType`、`secret`、`insecureSsl`、`events`、`active`；update 额外支持 `addEvents`/`removeEvents`，`insecureSsl` 由 boolean 转为 API 的 `"1"`/`"0"`。
 - 验收：typecheck ✅；150/150 单测（含 webhook/asset 映射、POST/PATCH/DELETE body 断言、404/422、无 token、presentCall/presentResult）。
 
+### 阶段 19：Repository Collaborator 与 Team Repo 管理（2026-08-26 新增）
+
+v0.13 方向：补齐仓库协作者委派，并让 Agent 直接管理组织团队对仓库的访问。
+
+| 工具 | 功能 | 需 token | 状态 |
+|---|---|---|---|
+| `github_list_collaborators` | 列出仓库协作者及有效权限 | 是 | ✅ 已实现 |
+| `github_get_collaborator_permission` | 查看单个协作者权限与来源 | 是 | ✅ 已实现 |
+| `github_add_collaborator` | 邀请或添加协作者并设置 permission | 是 | ✅ 已实现 |
+| `github_update_collaborator_permission` | 更新现有协作者权限 | 是 | ✅ 已实现 |
+| `github_remove_collaborator` | 移除直接协作者 | 是 | ✅ 已实现 |
+| `github_add_team_repo` | 授予组织团队仓库访问权限（pull/push/admin） | 是 | ✅ 已实现 |
+| `github_remove_team_repo` | 移除组织团队对仓库的访问权限 | 是 | ✅ 已实现 |
+
+- 7 个工具均需 token：只读工具无 token 返回 `{ found: false, reason: '... token ...' }`，写工具返回 `{ ok: false, reason: '... token ...' }`；404/422 尽量映射为业务失败值；401/403 仍抛基础设施错误。
+- 验收：typecheck ✅；157/157 单测（含 collaborator 映射与过滤、PUT/DELETE body 断言、team repo 读写、404/422、无 token、presentCall）。
+
 ## 5. 开发日志（每次推进后追加，带时间戳）
+
+### 2026-08-26（阶段 19：Repository Collaborator 与 Team Repo 管理完成，共 90 个工具）
+- 新增 5 个 collaborator 工具：GET/PUT/DELETE `/repos/{owner}/{repo}/collaborators` 与 `/collaborators/{username}`、`/collaborators/{username}/permission`；列表支持 affiliation/permission/per_page 过滤。
+- 新增 2 个 team repo 工具：PUT/DELETE `/orgs/{org}/teams/{team_slug}/repos/{owner}/{repo}`，支持 pull/push/admin 权限。
+- 只读工具无 token 返回 `{ found: false, reason }`；写工具无 token 返回 `{ ok: false, reason }`；404/422 映射为业务失败值。
+- 测试：client +2（collaborator 映射与过滤、collaborator/team repo PUT/DELETE body 与失败路径），tools +5（7 工具无 token、collaborator 带 token 传参、team repo 带 token 传参、404/422 业务值、presentCall）；共 157/157 通过。
+- 验证：typecheck ✅、vitest 157/157 ✅、build ✅；README 中英文工具表同步（90 工具）。
 
 ### 2026-08-25（阶段 18：Repository Webhook 与 Release Assets 完成，共 83 个工具）
 - 新增 6 个 webhook 工具：GET/POST/PATCH/DELETE `/repos/{owner}/{repo}/hooks` 与 `/hooks/{hook_id}`，另有 ping 端点；列表/详情映射事件、config、投递与测试端点。

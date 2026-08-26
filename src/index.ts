@@ -3991,6 +3991,363 @@ export function createTools(client: GithubClient) {
     }),
 
     defineTool({
+      name: 'github_list_collaborators',
+      description: 'List repository collaborators with their effective permissions. Requires a token with repository access.',
+      parameters: {
+        owner: { type: 'string', required: true, description: 'Repository owner' },
+        repo: { type: 'string', required: true, description: 'Repository name' },
+        affiliation: { type: 'string', enum: ['all', 'direct', 'outside'], description: 'Collaborator affiliation filter (default all)' },
+        permission: { type: 'string', enum: ['pull', 'triage', 'push', 'maintain', 'admin'], description: 'Filter collaborators by permission' },
+        limit: { type: 'integer', description: 'Maximum results, 1-100 (default 30)' },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            found: { type: 'boolean', description: 'Whether collaborators can be listed' },
+            reason: { type: 'string', description: 'Explanation when collaborators are not accessible' },
+            items: {
+              type: 'array',
+              items: {
+                type: 'object',
+                additionalProperties: false,
+                properties: {
+                  login: { type: 'string', description: 'GitHub username' },
+                  id: { type: 'integer', description: 'User id' },
+                  avatarUrl: { type: 'string', description: 'Avatar URL' },
+                  permissions: {
+                    type: 'object',
+                    additionalProperties: false,
+                    properties: {
+                      pull: { type: 'boolean', description: 'Can pull' },
+                      triage: { type: 'boolean', description: 'Can triage' },
+                      push: { type: 'boolean', description: 'Can push' },
+                      maintain: { type: 'boolean', description: 'Can maintain' },
+                      admin: { type: 'boolean', description: 'Can administer' },
+                    },
+                    description: 'Effective permission flags',
+                  },
+                  roleName: { type: 'string', description: 'Highest role name' },
+                  url: { type: 'string', description: 'API user URL' },
+                  htmlUrl: { type: 'string', description: 'GitHub user URL' },
+                },
+              },
+            },
+          },
+        },
+        render: (_args, value) => {
+          if (!value.found) return [{ type: 'text', text: 'Repository collaborators are not accessible.' }]
+          const items = value.items ?? []
+          if (items.length === 0) return [{ type: 'text', text: 'No collaborators found.' }]
+          return [{ type: 'text', text: items.map(item => {
+            const permission = item.permissions ? Object.entries(item.permissions).filter(([, enabled]) => enabled).map(([name]) => name).join('/') : item.roleName ?? 'unknown'
+            return `${item.login} (${permission}) ${item.htmlUrl}`
+          }).join('\n') }]
+        },
+      },
+      presentCall(args): ToolCallView {
+        return { card: 'generic', title: `Collaborators: ${args.owner}/${args.repo}`, kind: 'search' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { found?: boolean; items?: Array<{ login: string }> }
+        if (!v.found) return { card: 'generic', title: 'Collaborators not accessible' }
+        const items = v.items ?? []
+        if (items.length === 0) return { card: 'generic', title: 'No collaborators' }
+        return { card: 'generic', title: `${items.length} collaborator(s)`, content: [{ type: 'text', text: items.map(i => i.login).join('\n') }] }
+      },
+      async execute(args, exec) {
+        if (!client.hasToken()) {
+          return { found: false, items: [], reason: 'Listing repository collaborators requires a GitHub token. Configure the plugin with a token.' }
+        }
+        const limit = args.limit === undefined ? 30 : Math.max(1, Math.min(args.limit as number, 100))
+        try {
+          const items = await client.listCollaborators(args.owner as string, args.repo as string, {
+            affiliation: args.affiliation as 'all' | 'direct' | 'outside' | undefined,
+            permission: args.permission as 'pull' | 'triage' | 'push' | 'maintain' | 'admin' | undefined,
+            perPage: limit,
+            signal: exec.signal,
+          })
+          return { found: true, items }
+        } catch (error) {
+          if (error instanceof GithubError && error.status === 404) {
+            return { found: false, items: [] }
+          }
+          throw error
+        }
+      },
+    }),
+
+    defineTool({
+      name: 'github_get_collaborator_permission',
+      description: 'Get one repository collaborator permission and effective role. Requires a token with repository admin access.',
+      parameters: {
+        owner: { type: 'string', required: true, description: 'Repository owner' },
+        repo: { type: 'string', required: true, description: 'Repository name' },
+        username: { type: 'string', required: true, description: 'GitHub username' },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            found: { type: 'boolean', description: 'Whether the collaborator exists and is accessible' },
+            login: { type: 'string', description: 'GitHub username' },
+            permission: { type: 'string', description: 'Effective permission' },
+            roleName: { type: 'string', description: 'Role name' },
+            source: { type: 'string', description: 'Permission source' },
+            userUrl: { type: 'string', description: 'GitHub user URL' },
+            reason: { type: 'string', description: 'Explanation when not found' },
+          },
+        },
+        render: (_args, value) => {
+          if (!value.found) return [{ type: 'text', text: 'Collaborator not found or not accessible.' }]
+          return [{ type: 'text', text: `${value.login}: ${value.permission}${value.roleName ? ` (${value.roleName})` : ''}${value.source ? ` via ${value.source}` : ''}` }]
+        },
+      },
+      presentCall(args): ToolCallView {
+        return { card: 'generic', title: `Collaborator permission: ${args.username}`, kind: 'read' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { found?: boolean; login?: string; permission?: string }
+        if (!v.found) return { card: 'generic', title: 'Collaborator not found' }
+        return { card: 'generic', title: `${v.login}: ${v.permission}` }
+      },
+      async execute(args, exec) {
+        if (!client.hasToken()) {
+          return { found: false, reason: 'Getting collaborator permission requires a GitHub token with repository admin access.' }
+        }
+        try {
+          const permission = await client.getCollaboratorPermission(args.owner as string, args.repo as string, args.username as string, exec.signal)
+          return { found: true, ...permission }
+        } catch (error) {
+          if (error instanceof GithubError && error.status === 404) {
+            return { found: false }
+          }
+          throw error
+        }
+      },
+    }),
+
+    defineTool({
+      name: 'github_add_collaborator',
+      description: 'Invite or add a repository collaborator with a permission level. WRITE operation: requires a token with repository admin access.',
+      parameters: {
+        owner: { type: 'string', required: true, description: 'Repository owner' },
+        repo: { type: 'string', required: true, description: 'Repository name' },
+        username: { type: 'string', required: true, description: 'GitHub username' },
+        permission: { type: 'string', enum: ['pull', 'triage', 'push', 'maintain', 'admin'], description: 'Permission level (default pull)' },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            ok: { type: 'boolean', description: 'Whether the collaborator was added or invited' },
+            login: { type: 'string', description: 'GitHub username' },
+            permission: { type: 'string', description: 'Assigned permission' },
+            created: { type: 'boolean', description: 'Whether a collaborator body was returned (newly invited)' },
+            reason: { type: 'string', description: 'Explanation when not added' },
+          },
+        },
+        render: (_args, value) => {
+          if (value.ok) return [{ type: 'text', text: `Added ${value.login} to ${_args.owner}/${_args.repo} as ${value.permission}` }]
+          return [{ type: 'text', text: `Could not add ${value.login}: ${value.reason}` }]
+        },
+      },
+      presentCall(args): ToolCallView {
+        return { card: 'generic', title: `Add collaborator ${args.username}`, kind: 'edit' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { ok?: boolean; login?: string; permission?: string; reason?: string }
+        if (v.ok) return { card: 'generic', title: `Collaborator ${v.login} added`, content: [{ type: 'text', text: v.permission ?? '' }] }
+        return { card: 'generic', title: 'Add collaborator failed', content: [{ type: 'text', text: v.reason ?? 'Unknown' }] }
+      },
+      async execute(args, exec) {
+        if (!client.hasToken()) {
+          return { ok: false, login: args.username as string, reason: 'Adding a collaborator requires a GitHub token with repository admin access.' }
+        }
+        return client.setCollaboratorPermission(args.owner as string, args.repo as string, args.username as string, {
+          permission: args.permission as 'pull' | 'triage' | 'push' | 'maintain' | 'admin' | undefined,
+          signal: exec.signal,
+        })
+      },
+    }),
+
+    defineTool({
+      name: 'github_update_collaborator_permission',
+      description: 'Update an existing repository collaborator permission. WRITE operation: requires a token with repository admin access.',
+      parameters: {
+        owner: { type: 'string', required: true, description: 'Repository owner' },
+        repo: { type: 'string', required: true, description: 'Repository name' },
+        username: { type: 'string', required: true, description: 'GitHub username' },
+        permission: { type: 'string', enum: ['pull', 'triage', 'push', 'maintain', 'admin'], required: true, description: 'New permission level' },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            ok: { type: 'boolean', description: 'Whether the permission was updated' },
+            login: { type: 'string', description: 'GitHub username' },
+            permission: { type: 'string', description: 'Updated permission' },
+            reason: { type: 'string', description: 'Explanation when not updated' },
+          },
+        },
+        render: (_args, value) => {
+          if (value.ok) return [{ type: 'text', text: `Updated ${value.login} to ${value.permission}` }]
+          return [{ type: 'text', text: `Could not update ${value.login}: ${value.reason}` }]
+        },
+      },
+      presentCall(args): ToolCallView {
+        return { card: 'generic', title: `Update collaborator ${args.username}`, kind: 'edit' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { ok?: boolean; login?: string; permission?: string; reason?: string }
+        if (v.ok) return { card: 'generic', title: `Collaborator ${v.login} updated`, content: [{ type: 'text', text: v.permission ?? '' }] }
+        return { card: 'generic', title: 'Update collaborator failed', content: [{ type: 'text', text: v.reason ?? 'Unknown' }] }
+      },
+      async execute(args, exec) {
+        if (!client.hasToken()) {
+          return { ok: false, login: args.username as string, reason: 'Updating collaborator permission requires a GitHub token with repository admin access.' }
+        }
+        const result = await client.setCollaboratorPermission(args.owner as string, args.repo as string, args.username as string, {
+          permission: args.permission as 'pull' | 'triage' | 'push' | 'maintain' | 'admin',
+          signal: exec.signal,
+        })
+        return { ok: result.ok, login: result.login, permission: result.permission, reason: result.reason }
+      },
+    }),
+
+    defineTool({
+      name: 'github_remove_collaborator',
+      description: 'Remove a direct collaborator from a repository. WRITE operation: requires a token with repository admin access.',
+      parameters: {
+        owner: { type: 'string', required: true, description: 'Repository owner' },
+        repo: { type: 'string', required: true, description: 'Repository name' },
+        username: { type: 'string', required: true, description: 'GitHub username' },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            ok: { type: 'boolean', description: 'Whether the collaborator was removed' },
+            login: { type: 'string', description: 'GitHub username' },
+            reason: { type: 'string', description: 'Explanation when not removed' },
+          },
+        },
+        render: (_args, value) => {
+          if (value.ok) return [{ type: 'text', text: `Removed ${value.login} from ${_args.owner}/${_args.repo}` }]
+          return [{ type: 'text', text: `Could not remove ${value.login}: ${value.reason}` }]
+        },
+      },
+      presentCall(args): ToolCallView {
+        return { card: 'generic', title: `Remove collaborator ${args.username}`, kind: 'edit' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { ok?: boolean; login?: string; reason?: string }
+        if (v.ok) return { card: 'generic', title: `Collaborator ${v.login} removed` }
+        return { card: 'generic', title: 'Remove collaborator failed', content: [{ type: 'text', text: v.reason ?? 'Unknown' }] }
+      },
+      async execute(args, exec) {
+        if (!client.hasToken()) {
+          return { ok: false, login: args.username as string, reason: 'Removing a collaborator requires a GitHub token with repository admin access.' }
+        }
+        return client.removeCollaborator(args.owner as string, args.repo as string, args.username as string, exec.signal)
+      },
+    }),
+
+    defineTool({
+      name: 'github_add_team_repo',
+      description: 'Grant an organization team access to a repository. WRITE operation: requires a token with organization/repository admin access.',
+      parameters: {
+        org: { type: 'string', required: true, description: 'Organization login' },
+        teamSlug: { type: 'string', required: true, description: 'Team slug' },
+        owner: { type: 'string', required: true, description: 'Repository owner' },
+        repo: { type: 'string', required: true, description: 'Repository name' },
+        permission: { type: 'string', enum: ['pull', 'push', 'admin'], description: 'Team permission (default push)' },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            ok: { type: 'boolean', description: 'Whether repository access was granted' },
+            org: { type: 'string', description: 'Organization login' },
+            teamSlug: { type: 'string', description: 'Team slug' },
+            repo: { type: 'string', description: 'Full repository name' },
+            permission: { type: 'string', description: 'Granted permission' },
+            reason: { type: 'string', description: 'Explanation when not granted' },
+          },
+        },
+        render: (_args, value) => {
+          if (value.ok) return [{ type: 'text', text: `Granted ${value.teamSlug} ${value.permission} access to ${value.repo}` }]
+          return [{ type: 'text', text: `Could not grant ${_args.teamSlug} access to ${_args.owner}/${_args.repo}: ${value.reason}` }]
+        },
+      },
+      presentCall(args): ToolCallView {
+        return { card: 'generic', title: `Add ${args.repo} to ${args.teamSlug}`, kind: 'edit' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { ok?: boolean; teamSlug?: string; repo?: string; permission?: string; reason?: string }
+        if (v.ok) return { card: 'generic', title: `Team ${v.teamSlug} added`, content: [{ type: 'text', text: `${v.repo} (${v.permission})` }] }
+        return { card: 'generic', title: 'Add team repo failed', content: [{ type: 'text', text: v.reason ?? 'Unknown' }] }
+      },
+      async execute(args, exec) {
+        if (!client.hasToken()) {
+          return { ok: false, org: args.org as string, teamSlug: args.teamSlug as string, repo: `${args.owner}/${args.repo}`, reason: 'Adding a repository to a team requires a GitHub token with organization access.' }
+        }
+        return client.addTeamRepo(args.org as string, args.teamSlug as string, args.owner as string, args.repo as string, {
+          permission: args.permission as 'pull' | 'push' | 'admin' | undefined,
+          signal: exec.signal,
+        })
+      },
+    }),
+
+    defineTool({
+      name: 'github_remove_team_repo',
+      description: 'Remove an organization team repository access. WRITE operation: requires a token with organization/repository admin access.',
+      parameters: {
+        org: { type: 'string', required: true, description: 'Organization login' },
+        teamSlug: { type: 'string', required: true, description: 'Team slug' },
+        owner: { type: 'string', required: true, description: 'Repository owner' },
+        repo: { type: 'string', required: true, description: 'Repository name' },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            ok: { type: 'boolean', description: 'Whether repository access was removed' },
+            org: { type: 'string', description: 'Organization login' },
+            teamSlug: { type: 'string', description: 'Team slug' },
+            repo: { type: 'string', description: 'Full repository name' },
+            reason: { type: 'string', description: 'Explanation when not removed' },
+          },
+        },
+        render: (_args, value) => {
+          if (value.ok) return [{ type: 'text', text: `Removed ${value.repo} from ${value.teamSlug}` }]
+          return [{ type: 'text', text: `Could not remove ${_args.owner}/${_args.repo} from ${_args.teamSlug}: ${value.reason}` }]
+        },
+      },
+      presentCall(args): ToolCallView {
+        return { card: 'generic', title: `Remove ${args.repo} from ${args.teamSlug}`, kind: 'edit' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { ok?: boolean; teamSlug?: string; repo?: string; reason?: string }
+        if (v.ok) return { card: 'generic', title: `Team ${v.teamSlug} access removed`, content: [{ type: 'text', text: v.repo ?? '' }] }
+        return { card: 'generic', title: 'Remove team repo failed', content: [{ type: 'text', text: v.reason ?? 'Unknown' }] }
+      },
+      async execute(args, exec) {
+        if (!client.hasToken()) {
+          return { ok: false, org: args.org as string, teamSlug: args.teamSlug as string, repo: `${args.owner}/${args.repo}`, reason: 'Removing a repository from a team requires a GitHub token with organization access.' }
+        }
+        return client.removeTeamRepo(args.org as string, args.teamSlug as string, args.owner as string, args.repo as string, exec.signal)
+      },
+    }),
+
+    defineTool({
       name: 'github_list_repo_webhooks',
       description: 'List repository webhooks with active state, subscribed events, delivery URLs, and configuration metadata. Requires a token with repository admin access.',
       parameters: {

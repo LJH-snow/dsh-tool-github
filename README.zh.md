@@ -86,6 +86,13 @@ npm install /path/to/dsh-tool-github
 | `github_list_team_repos` | 列出团队可访问仓库 | 是 |
 | `github_update_team_membership` | 添加团队成员或修改角色 | 是 |
 | `github_remove_team_membership` | 从组织团队移除用户 | 是 |
+| `github_list_collaborators` | 列出仓库协作者及有效权限 | 是 |
+| `github_get_collaborator_permission` | 查看单个协作者权限与来源 | 是 |
+| `github_add_collaborator` | 邀请或添加仓库协作者并设置权限 | 是 |
+| `github_update_collaborator_permission` | 更新现有协作者权限 | 是 |
+| `github_remove_collaborator` | 从仓库移除直接协作者 | 是 |
+| `github_add_team_repo` | 授予组织团队仓库访问权限 | 是 |
+| `github_remove_team_repo` | 移除组织团队对仓库的访问权限 | 是 |
 | `github_list_repo_webhooks` | 列出仓库 webhook（事件、配置、投递端点） | 是 |
 | `github_get_repo_webhook` | 查看单个仓库 webhook 配置 | 是 |
 | `github_create_repo_webhook` | 创建仓库 webhook（事件、secret、内容类型、启用状态） | 是 |
