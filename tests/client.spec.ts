@@ -1602,3 +1602,11 @@ describe('GitHub endpoint policy', () => {
     expect(fetchImpl).toHaveBeenCalledTimes(1)
   })
 })
+
+describe('GithubError identity', () => {
+  it('reports its own class name so callers can branch on error.name', () => {
+    const error = new GithubError('probe', 400)
+    expect(error).toBeInstanceOf(GithubError)
+    expect(error.name).toBe('GithubError')
+  })
+})

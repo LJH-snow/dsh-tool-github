@@ -1,7 +1,7 @@
 {
   "name": "@libai168/dsh-tool-github",
   "description": "GitHub tools for DeepSeek Harness: repo lookup, issue listing, code search, and PR drafts",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "type": "module",
   "main": "lib/index.js",
   "types": "lib/types/index.d.ts",

@@ -639,6 +639,7 @@ export type IssueState = 'open' | 'closed' | 'all'
 export class GithubError extends Error {
   constructor(message: string, readonly status: number) {
     super(message)
+    this.name = 'GithubError'
   }
 }
 
