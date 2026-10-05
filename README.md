@@ -45,6 +45,8 @@ Full example: [examples/cordis.yml](examples/cordis.yml).
 
 > Security: read-only tools need no token. `github_search_code` and `github_create_pr_draft` require a token. Prefer a minimal-scope fine-grained token and never commit it.
 
+The endpoint is checked before every request. Link-local addresses (`169.254.0.0/16`, `fe80::/10`, including their IPv4-mapped and NAT64 forms) are always rejected: they are never a valid API endpoint and include the cloud metadata address. Self-hosted endpoints on private networks keep working by default. Set `enforcePublicEndpoint: true` to additionally require a publicly reachable host; that mode also resolves ordinary hostnames and rejects loopback, private, CGNAT, multicast, reserved, and every IANA special-purpose range.
+
 ## Tools
 
 | Tool | Description | Token |

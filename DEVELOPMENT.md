@@ -565,3 +565,13 @@ v0.13 方向：补齐仓库协作者委派，并让 Agent 直接管理组织团�
 | - | 风险：npm 网络受限 | 若 pnpm install 失败，考虑从官方仓库 pnpm workspace 内联调试 |
 | 2026-08-13 | npm 版本适配：cordis 4.0.1、dsh-tools 0.1.0-rc.6 | 官方仓库 workspace 版本号与 npm 发布版不一致，以 npm view 实查为准 |
 | 2026-08-13 | 本机 npm 全局缓存 root-owned 文件（EPERM） | 临时用 `--cache /private/tmp/...` 绕过；正式发布前修复 `~/.npm` 权限 |
+
+## endpoint 安全校验
+
+`baseUrl` 默认行为不变（仅去尾斜杠），每次请求前额外做字面量链路本地校验：`169.254.0.0/16`、`fe80::/10`，以及 `::/96`、`::ffff:0:0/96`、`64:ff9b::/96` 中内嵌的 IPv4 形式。默认模式**不做 DNS 解析**，因此域名端点行为与之前完全一致。
+
+设置 `enforcePublicEndpoint: true` 后启用完整策略：`baseUrl` 规范化为 origin + 路径前缀（禁止 credentials/query/fragment），并对解析结果做 fail-closed 校验。
+
+两个模式的地址清单共享同一份 `src/url-security.ts`——该文件由 `.verify/gen-url-security-b.mjs` 从 A 类模板加 B 类策略层生成，网段清单与 A 类逐行一致（18 个 IPv4 + 16 个 IPv6，对齐 IANA 注册表），不得单独修改。`lookupImpl` 仅作测试注入点，不进入插件配置接口。
+
+自建部署（内网 GitLab / GitHub Enterprise / Jira DC / 自托管 Sentry）默认不受影响，这是本插件不默认开启公网限制的原因。

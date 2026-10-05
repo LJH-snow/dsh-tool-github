@@ -1,5 +1,6 @@
 import { inflateRawSync } from 'node:zlib'
 import sodium from 'libsodium-wrappers'
+import { EndpointSecurityError, guardEndpoint, normalizeBaseUrl, type EndpointPolicy, type LookupImpl } from './url-security.js'
 
 /** GitHub REST client with injected fetch for testability. */
 
@@ -7,6 +8,10 @@ export interface GithubClientOptions {
   baseUrl?: string
   token?: string
   fetchImpl?: typeof fetch
+  /** Require a publicly reachable endpoint and resolve hostnames. Off by default so self-hosted deployments keep working. */
+  enforcePublicEndpoint?: boolean
+  /** Test-only DNS lookup override; production uses node:dns/promises. */
+  lookupImpl?: LookupImpl
   /** Request timeout in milliseconds. 0 disables the timeout. */
   timeoutMs?: number
 }
@@ -974,12 +979,21 @@ export class GithubClient {
   private readonly token: string | undefined
   private readonly fetchImpl: typeof fetch
   private readonly timeoutMs: number
+  private readonly endpointPolicy: EndpointPolicy
 
   constructor(options: GithubClientOptions = {}) {
-    this.baseUrl = (options.baseUrl ?? 'https://api.github.com').replace(/\/$/, '')
+    try {
+      this.baseUrl = options.enforcePublicEndpoint === true
+        ? normalizeBaseUrl(options.baseUrl, 'https://api.github.com')
+        : (options.baseUrl ?? 'https://api.github.com').replace(/\/$/, '')
+    } catch (error) {
+      if (error instanceof EndpointSecurityError) throw new GithubError(error.message, 400)
+      throw error
+    }
     this.token = options.token
     this.fetchImpl = options.fetchImpl ?? globalThis.fetch
     this.timeoutMs = options.timeoutMs ?? 15_000
+    this.endpointPolicy = { enforcePublicEndpoint: options.enforcePublicEndpoint === true, lookupImpl: options.lookupImpl }
   }
 
   hasToken(): boolean {
@@ -1009,7 +1023,9 @@ export class GithubClient {
       headers['content-type'] = 'application/json'
       init.body = JSON.stringify(options.body)
     }
-    const res = await this.fetchImpl(`${this.baseUrl}${path}`, init)
+        const blocked = await guardEndpoint(`${this.baseUrl}${path}`, this.endpointPolicy)
+    if (blocked) throw new GithubError(blocked, 400)
+const res = await this.fetchImpl(`${this.baseUrl}${path}`, init)
     if (res.status === 404) throw new GithubError('Not found', 404)
     if (res.status === 401) throw new GithubError('Invalid or missing GitHub token', 401)
     if (res.status === 403) throw new GithubError('GitHub rate limit exceeded or forbidden', 403)
@@ -2596,7 +2612,9 @@ export class GithubClient {
 
   async getWorkflowRunLogs(owner: string, repo: string, runId: number, options: { maxChars?: number; signal?: AbortSignal } = {}): Promise<WorkflowLogsResult> {
     const url = `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/actions/runs/${runId}/logs`
-    const res = await this.fetchImpl(`${this.baseUrl}${url}`, {
+        const blocked = await guardEndpoint(`${this.baseUrl}${url}`, this.endpointPolicy)
+    if (blocked) throw new GithubError(blocked, 400)
+const res = await this.fetchImpl(`${this.baseUrl}${url}`, {
       headers: this.headers(),
       method: 'GET',
       signal: this.combinedSignal(options.signal),
